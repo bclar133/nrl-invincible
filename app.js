@@ -10,7 +10,7 @@ const SLOT_ORDER = [
   { key: "edge", label: "Edge 2", line: "edges" },
   { key: "middle", label: "Middle 1", line: "middles" },
   { key: "middle", label: "Middle 2", line: "middles" },
-  { key: "middle", label: "Middle 3", line: "middles" },
+  { key: "lock", label: "Lock", line: "lock" },
   { key: "hooker", label: "Hooker", line: "hooker" }
 ];
 
@@ -20,7 +20,8 @@ const SLOT_LINES = [
   { key: "centres", slots: [3, 4] },
   { key: "halves", slots: [5, 6] },
   { key: "edges", slots: [7, 8] },
-  { key: "middles", slots: [9, 10, 11] },
+  { key: "middles", slots: [9, 10] },
+  { key: "lock", slots: [11] },
   { key: "hooker", slots: [12] }
 ];
 
@@ -31,6 +32,7 @@ const POSITION_LABELS = {
   half: "Half",
   edge: "Edge",
   middle: "Middle",
+  lock: "Lock",
   hooker: "Hooker"
 };
 
@@ -39,9 +41,10 @@ const POSITION_EXPANSION = {
   wing: ["centre", "fullback"],
   centre: ["wing", "fullback", "edge"],
   half: ["fullback", "hooker"],
-  edge: ["middle", "centre"],
-  middle: ["edge", "hooker"],
-  hooker: ["half", "middle"]
+  edge: ["lock", "middle", "centre"],
+  middle: ["lock", "edge", "hooker"],
+  lock: ["middle", "edge", "hooker", "half"],
+  hooker: ["half", "lock", "middle"]
 };
 
 const PLAY_STYLES = {
@@ -457,6 +460,98 @@ const SQUAD_DEPTH = [
 ];
 
 PLAYER_SEASONS.push(...SQUAD_DEPTH);
+mergeGeneratedPlayerSeasons();
+enrichImportedPlayerPositions();
+
+function mergeGeneratedPlayerSeasons() {
+  const generated = Array.isArray(window.NRL_GENERATED_PLAYER_SEASONS) ? window.NRL_GENERATED_PLAYER_SEASONS : [];
+  const existingByKey = new Map(PLAYER_SEASONS.map((item) => [playerSeasonMergeKey(item), item]));
+
+  for (const raw of generated) {
+    const imported = hydrateImportedPlayer(raw);
+    if (!imported) continue;
+
+    const key = playerSeasonMergeKey(imported);
+    const existing = existingByKey.get(key);
+
+    if (existing) {
+      existing.careerId = imported.careerId;
+      existing.positions = mergePositions(existing.positions, imported.positions);
+      existing.apps = imported.apps;
+      existing.starts = imported.starts;
+      existing.source = "Curated + RLP";
+      continue;
+    }
+
+    PLAYER_SEASONS.push(imported);
+    existingByKey.set(key, imported);
+  }
+}
+
+function hydrateImportedPlayer(raw) {
+  if (!raw || !raw.name || !raw.season || !raw.club || !raw.careerId) return null;
+  const importedRatings = Array.isArray(raw.ratings) ? ratings(...raw.ratings) : raw.ratings;
+
+  return {
+    id: raw.id,
+    careerId: raw.careerId,
+    name: raw.name,
+    season: raw.season,
+    club: raw.club,
+    positions: normalizePositions(raw.positions || []),
+    role: raw.role || "squad player",
+    ratings: importedRatings,
+    source: raw.source || "RLP",
+    apps: raw.apps || 0,
+    starts: raw.starts || 0
+  };
+}
+
+function enrichImportedPlayerPositions() {
+  for (const item of PLAYER_SEASONS) {
+    item.positions = normalizePositions(item.positions || []);
+
+    if (/\block\b/i.test(item.role || "") && !item.positions.includes("lock")) {
+      item.positions = insertAfterForward(item.positions, "lock");
+    }
+  }
+}
+
+function mergePositions(primaryPositions, importedPositions) {
+  return normalizePositions([...(primaryPositions || []), ...(importedPositions || [])]);
+}
+
+function normalizePositions(positions) {
+  const rank = Object.keys(POSITION_LABELS);
+  const normalized = [];
+
+  for (const position of positions) {
+    if (rank.includes(position) && !normalized.includes(position)) {
+      normalized.push(position);
+    }
+  }
+
+  return normalized;
+}
+
+function insertAfterForward(positions, position) {
+  const copy = [...positions];
+  const insertIndex = Math.max(copy.indexOf("middle"), copy.indexOf("edge"));
+  if (insertIndex >= 0) {
+    copy.splice(insertIndex + 1, 0, position);
+  } else {
+    copy.push(position);
+  }
+  return normalizePositions(copy);
+}
+
+function playerSeasonMergeKey(item) {
+  return `${item.season}|${item.club}|${normalizeNameForKey(item.name)}`;
+}
+
+function normalizeNameForKey(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
 
 const OPPONENTS = [
   { id: "opp-brisbane", name: "Brisbane", attack: 88, defence: 84, power: 88, clutch: 86, goalSkill: 82 },
@@ -587,7 +682,7 @@ function render() {
     </section>
 
     <p class="notice">
-      Independent fan-made draft game prototype. Club and player names are used descriptively to power gameplay. Seed ratings are independent estimates for MVP testing and are not official data.
+      Independent fan-made draft game prototype. Player-season positions are generated from Rugby League Project team pages; ratings are independent gameplay estimates and are not official data.
     </p>
   `;
 
@@ -628,7 +723,7 @@ function renderToolbar() {
   }
 
   return `
-    <button class="button" data-action="spin" ${isDraftComplete() || state.currentOffer ? "disabled" : ""}><span class="icon">o</span>Spin</button>
+    <button class="button spin-button" data-action="spin" ${isDraftComplete() || state.currentOffer ? "disabled" : ""}><span class="icon">o</span>Spin</button>
     <button class="button" data-action="reroll" ${state.currentOffer && !state.rerollUsed && !isDraftComplete() ? "" : "disabled"}><span class="icon">~</span>Re-roll ${state.rerollUsed ? "Used" : "1"}</button>
     <button class="button primary" data-action="simulate" ${isDraftComplete() ? "" : "disabled"}><span class="icon">></span>Simulate Season</button>
     <button class="button warning" data-action="reset"><span class="icon">x</span>Reset</button>
@@ -640,10 +735,10 @@ function renderSquadPanel() {
   const filledCount = state.drafted.length;
 
   return `
-    <section class="panel">
+    <section class="panel squad-panel">
       <div class="panel-header">
         <h2 class="panel-title">Selected XIII</h2>
-        <span class="mini">${filledCount}/13 drafted</span>
+        <span class="mini">${filledCount}/${SLOT_ORDER.length} drafted</span>
       </div>
       <div class="meter-row">
         <div class="metric"><b>${teamRatings.overall}</b><span>Overall</span></div>
@@ -708,6 +803,7 @@ function renderDraftPanel() {
         <button class="mode-button ${state.ratingMode === "season" ? "active" : ""}" data-action="set-mode" data-mode="season" ${state.drafted.length ? "disabled" : ""}>Season Form</button>
         <button class="mode-button ${state.ratingMode === "career" ? "active" : ""}" data-action="set-mode" data-mode="career" ${state.drafted.length ? "disabled" : ""}>Career Peak</button>
       </div>
+      ${!state.drafted.length && !state.currentOffer ? renderIntroPanel() : ""}
       ${isDraftComplete() ? renderStylePicker() : ""}
       <div class="spin-stage">
         ${renderSpinStage()}
@@ -716,12 +812,25 @@ function renderDraftPanel() {
   `;
 }
 
+function renderIntroPanel() {
+  return `
+    <div class="intro-panel">
+      <h2>Can you go through a season undefeated?</h2>
+      <div class="intro-grid">
+        <p>Spin a random NRL club-season from 1998-2025, choose one squad player, then place him into an open position.</p>
+        <p>Natural positions play best. Secondary and cover roles work, but the player takes a performance hit.</p>
+        <p>You get one re-roll for the whole run. After the XIII is full, choose a style and simulate the season.</p>
+      </div>
+    </div>
+  `;
+}
+
 function renderStylePicker() {
   return `
     <div class="style-picker">
       <div>
         <h3>Playing Style</h3>
-        <p>Choose the trade-off before you simulate.</p>
+        <p>Attack, defence, tempo and squad balance all feed the match engine.</p>
       </div>
       <div class="style-options">
         ${Object.entries(PLAY_STYLES).map(([key, style]) => `
@@ -752,7 +861,7 @@ function renderSpinStage() {
       <div class="wheel-card">
         <div class="next-slot">${getOpenSlots().length} open positions</div>
         <h2 class="wheel-title">Spin for a club-season</h2>
-        <p class="wheel-meta">${getAvailableSeasonCount()} eligible club-seasons in the seed database.</p>
+        <p class="wheel-meta">${getAvailableSeasonCount()} eligible club-seasons and ${formatNumber(PLAYER_SEASONS.length)} player-seasons in the database.</p>
       </div>
       <div class="empty-state">
         <div>
@@ -1415,8 +1524,8 @@ function calculateTeamRatings() {
     return Math.round(source.reduce((sum, item) => sum + getSimulationRatings(item)[key], 0) / source.length);
   };
   const spine = picks.filter((item) => ["fullback", "half", "hooker"].includes(item.slotKey));
-  const forwards = picks.filter((item) => ["edge", "middle", "hooker"].includes(item.slotKey));
-  const middles = picks.filter((item) => item.slotKey === "middle");
+  const forwards = picks.filter((item) => ["edge", "middle", "lock", "hooker"].includes(item.slotKey));
+  const middles = picks.filter((item) => ["middle", "lock"].includes(item.slotKey));
 
   const attack = Math.round(avg("attack") * 0.72 + avg("attack", spine) * 0.2 + avg("kicking", spine) * 0.08);
   const defence = Math.round(avg("defence") * 0.72 + avg("defence", forwards) * 0.22 + avg("workrate", forwards) * 0.06);
@@ -1858,6 +1967,7 @@ function baseTackles(slotKey) {
     half: 17,
     edge: 30,
     middle: 34,
+    lock: 37,
     hooker: 41
   }[slotKey];
 }
@@ -1870,6 +1980,7 @@ function baseMetres(slotKey) {
     half: 74,
     edge: 105,
     middle: 128,
+    lock: 116,
     hooker: 62
   }[slotKey];
 }
@@ -1882,6 +1993,7 @@ function tryWeight(row) {
     half: 0.82,
     edge: 0.92,
     middle: 0.54,
+    lock: 0.72,
     hooker: 0.48
   }[row.slotKey];
 
@@ -1896,6 +2008,7 @@ function tackleValue(slotKey) {
     half: 0.1,
     edge: 0.13,
     middle: 0.13,
+    lock: 0.14,
     hooker: 0.12
   }[slotKey];
 }
@@ -1908,6 +2021,7 @@ function metreValue(slotKey) {
     half: 0.016,
     edge: 0.019,
     middle: 0.018,
+    lock: 0.019,
     hooker: 0.014
   }[slotKey];
 }
