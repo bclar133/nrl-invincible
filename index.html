@@ -11,7 +11,17 @@
   </head>
   <body>
     <main id="app" class="shell"></main>
-    <script src="player-data.js"></script>
-    <script src="app.js"></script>
+    <script src="player-data.js?v=position-audit-20260613"></script>
+    <script>
+      window.addEventListener("error", (event) => {
+        const scriptPath = event.target?.src ? new URL(event.target.src).pathname : "";
+        if (scriptPath.endsWith("/player-position-audit.js")) {
+          event.preventDefault();
+          window.NRL_PLAYER_POSITION_AUDIT = null;
+        }
+      }, true);
+    </script>
+    <script src="player-position-audit.js?v=position-audit-20260613"></script>
+    <script src="app.js?v=position-audit-20260613"></script>
   </body>
 </html>

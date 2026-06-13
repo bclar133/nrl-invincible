@@ -36,17 +36,6 @@ const POSITION_LABELS = {
   hooker: "Hooker"
 };
 
-const POSITION_EXPANSION = {
-  fullback: ["wing", "centre"],
-  wing: ["centre", "fullback"],
-  centre: ["wing", "fullback", "edge"],
-  half: ["hooker"],
-  edge: ["lock", "middle", "centre"],
-  middle: ["lock", "edge", "hooker"],
-  lock: ["middle", "edge"],
-  hooker: ["half"]
-};
-
 const PLAY_STYLES = {
   balanced: {
     label: "Balanced",
@@ -128,7 +117,7 @@ const TEAM_ALIASES = {
 
 const CAREER_POSITION_OVERRIDES = {
   anthonyminichiello: ["fullback", "wing"],
-  andrewjohns: ["half", "hooker"],
+  andrewjohns: ["half"],
   darrenlockyer: ["fullback", "half"],
   greginglis: ["centre", "fullback", "wing"],
   billyslater: ["fullback"],
@@ -608,6 +597,7 @@ function enrichImportedPlayerPositions() {
 
 function applyCareerPositionCorrections() {
   const careerCounts = new Map();
+  const audit = window.NRL_PLAYER_POSITION_AUDIT;
 
   for (const item of PLAYER_SEASONS) {
     const key = normalizeNameForKey(item.name);
@@ -622,8 +612,19 @@ function applyCareerPositionCorrections() {
 
   for (const item of PLAYER_SEASONS) {
     const key = normalizeNameForKey(item.name);
-    const preferred = CAREER_POSITION_OVERRIDES[key] || careerPositionOrder(careerCounts.get(key));
-    item.positions = normalizePositions([...preferred, ...item.positions]).slice(0, 5);
+    const audited = audit?.byCareerId?.[item.careerId] || audit?.byNameKey?.[key];
+    const override = CAREER_POSITION_OVERRIDES[key];
+    const auditedPreferred = audited
+      ? normalizePositions([...(override || []).filter((position) => audited.positions.includes(position)), ...audited.positions])
+      : null;
+    const preferred = audited ? auditedPreferred : override || careerPositionOrder(careerCounts.get(key));
+    const originalPositions = normalizePositions(item.positions || []);
+    item.positions = normalizePositions([...preferred, ...originalPositions]).slice(0, 5);
+    if (audited) {
+      item.positions = normalizePositions(preferred);
+      item.positionAudit = audited;
+      item.source = `${item.source || "RLP"} + Position Audit`;
+    }
     item.role = refineRolePrimary(item.role, item.positions[0]);
   }
 }
@@ -1057,7 +1058,7 @@ function renderIntroPanel() {
       <h2>Can you go through a season undefeated?</h2>
       <div class="intro-grid">
         <p>Spin a random NRL club-season from 1998-2025, choose one squad player, then place him into an open position.</p>
-        <p>Natural positions play best. Secondary and cover roles work, but the player takes a performance hit.</p>
+        <p>Only regular real-life positions are selectable. A player's main position plays best, secondary regular positions carry a hit.</p>
         <p>You get one re-roll for the whole run. After the XIII is full, choose a style and simulate the season.</p>
         <p>Very rarely, an Immortal can appear for a club he played for. He is rated 100, but form and fit still matter.</p>
       </div>
@@ -1752,15 +1753,7 @@ function applyPositionFitToRatings(ratings, fit) {
 }
 
 function getEffectivePositions(candidate) {
-  const positions = new Set(candidate.positions);
-
-  for (const position of candidate.positions) {
-    for (const alternate of POSITION_EXPANSION[position] || []) {
-      positions.add(alternate);
-    }
-  }
-
-  return [...positions].sort((a, b) => Object.keys(POSITION_LABELS).indexOf(a) - Object.keys(POSITION_LABELS).indexOf(b));
+  return normalizePositions(candidate.positions || []);
 }
 
 function getEffectiveRatings(candidate) {
