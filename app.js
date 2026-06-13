@@ -37,14 +37,14 @@ const POSITION_LABELS = {
 };
 
 const POSITION_EXPANSION = {
-  fullback: ["wing", "centre", "half"],
+  fullback: ["wing", "centre"],
   wing: ["centre", "fullback"],
   centre: ["wing", "fullback", "edge"],
-  half: ["fullback", "hooker"],
+  half: ["hooker"],
   edge: ["lock", "middle", "centre"],
   middle: ["lock", "edge", "hooker"],
-  lock: ["middle", "edge", "hooker", "half"],
-  hooker: ["half", "lock", "middle"]
+  lock: ["middle", "edge"],
+  hooker: ["half"]
 };
 
 const PLAY_STYLES = {
@@ -103,7 +103,7 @@ const TEAM_COLOURS = {
   "North Sydney": ["#e2231a", "#111111"],
   "Northern Eagles": ["#6f263d", "#ffffff"],
   Parramatta: ["#005eb8", "#f2a900"],
-  Penrith: ["#111111", "#e2231a"],
+  Penrith: ["#111111", "#ff5ca8"],
   "South Sydney": ["#00843d", "#e2231a"],
   "St George": ["#e2231a", "#ffffff"],
   "St George Illawarra": ["#e2231a", "#ffffff"],
@@ -124,6 +124,28 @@ const TEAM_ALIASES = {
   Redcliffe: "Dolphins",
   "Redcliffe Dolphins": "Dolphins",
   St: "St George"
+};
+
+const CAREER_POSITION_OVERRIDES = {
+  anthonyminichiello: ["fullback", "wing"],
+  andrewjohns: ["half", "hooker"],
+  darrenlockyer: ["fullback", "half"],
+  greginglis: ["centre", "fullback", "wing"],
+  billyslater: ["fullback"],
+  cameronmunster: ["half", "fullback"],
+  bradfittler: ["half", "centre", "lock"],
+  cameronsmith: ["hooker", "half"],
+  johnathanthurston: ["half"],
+  coopercronk: ["half"],
+  johnsutton: ["edge", "half", "lock"],
+  jarrydhayne: ["fullback", "wing", "centre"],
+  dariusboyd: ["fullback", "wing", "centre"],
+  rogertuivasasheck: ["fullback", "wing"],
+  kalynponga: ["fullback", "half"],
+  clintgutherson: ["fullback", "centre", "half"],
+  latrellmitchell: ["centre", "fullback"],
+  valentineholmes: ["wing", "fullback", "centre"],
+  jamestedesco: ["fullback"]
 };
 
 const IMMORTAL_RATINGS = ratings(100, 100, 100, 100, 100, 100, 100);
@@ -528,6 +550,7 @@ const SQUAD_DEPTH = [
 PLAYER_SEASONS.push(...SQUAD_DEPTH);
 mergeGeneratedPlayerSeasons();
 enrichImportedPlayerPositions();
+applyCareerPositionCorrections();
 
 function mergeGeneratedPlayerSeasons() {
   const generated = Array.isArray(window.NRL_GENERATED_PLAYER_SEASONS) ? window.NRL_GENERATED_PLAYER_SEASONS : [];
@@ -581,6 +604,58 @@ function enrichImportedPlayerPositions() {
       item.positions = insertAfterForward(item.positions, "lock");
     }
   }
+}
+
+function applyCareerPositionCorrections() {
+  const careerCounts = new Map();
+
+  for (const item of PLAYER_SEASONS) {
+    const key = normalizeNameForKey(item.name);
+    if (!careerCounts.has(key)) careerCounts.set(key, new Map());
+
+    const counts = careerCounts.get(key);
+    item.positions.forEach((position, index) => {
+      const weight = index === 0 ? 3 : 1.35;
+      counts.set(position, (counts.get(position) || 0) + weight);
+    });
+  }
+
+  for (const item of PLAYER_SEASONS) {
+    const key = normalizeNameForKey(item.name);
+    const preferred = CAREER_POSITION_OVERRIDES[key] || careerPositionOrder(careerCounts.get(key));
+    item.positions = normalizePositions([...preferred, ...item.positions]).slice(0, 5);
+    item.role = refineRolePrimary(item.role, item.positions[0]);
+  }
+}
+
+function careerPositionOrder(counts) {
+  if (!counts?.size) return [];
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1] || Object.keys(POSITION_LABELS).indexOf(a[0]) - Object.keys(POSITION_LABELS).indexOf(b[0]));
+  const top = entries[0][1];
+
+  return entries
+    .filter(([, count], index) => index < 2 || count >= top * 0.22)
+    .slice(0, 4)
+    .map(([position]) => position);
+}
+
+function refineRolePrimary(role, primaryPosition) {
+  if (!primaryPosition || !role) return role || "squad player";
+  const prefixMatch = String(role).match(/^(regular|rotation|depth)\b/i);
+  if (!prefixMatch) return role;
+  const prefix = prefixMatch[1].toLowerCase();
+  const roleLabel = {
+    fullback: "fullback",
+    wing: "winger",
+    centre: "centre",
+    half: "playmaker",
+    edge: "edge forward",
+    middle: "middle forward",
+    lock: "lock forward",
+    hooker: "hooker"
+  }[primaryPosition] || "player";
+
+  return `${prefix} ${roleLabel}`;
 }
 
 function mergePositions(primaryPositions, importedPositions) {
@@ -827,7 +902,10 @@ function render() {
   app.innerHTML = `
     <section class="topbar">
       <div class="brand">
-        <div class="brand-mark">13</div>
+        <div class="brand-mark" aria-label="NRL Invincible icon">
+          <span class="mark-goal"></span>
+          <span class="mark-core">I</span>
+        </div>
         <div>
           <h1>NRL Invincible</h1>
           <p class="subtitle">${escapeHTML(getSubtitle())}</p>
@@ -965,6 +1043,7 @@ function renderDraftPanel() {
       </div>
       ${!state.drafted.length && !state.currentOffer ? renderIntroPanel() : ""}
       ${isDraftComplete() ? renderStylePicker() : ""}
+      ${isDraftComplete() ? renderPredictionPanel() : ""}
       <div class="spin-stage">
         ${renderSpinStage()}
       </div>
@@ -987,20 +1066,53 @@ function renderIntroPanel() {
 }
 
 function renderStylePicker() {
+  const advice = getStrategyAdvice();
+
   return `
     <div class="style-picker">
       <div>
         <h3>Playing Style</h3>
-        <p>Attack, defence, tempo and squad balance all feed the match engine.</p>
+        <p>${escapeHTML(advice.summary)}</p>
       </div>
       <div class="style-options">
         ${Object.entries(PLAY_STYLES).map(([key, style]) => `
           <button class="style-button ${state.playStyle === key ? "active" : ""}" data-action="set-style" data-style="${key}">
-            <b>${escapeHTML(style.label)}</b>
+            <b>${escapeHTML(style.label)}${advice.bestStyle === key ? ` <span class="style-badge">Scout pick</span>` : ""}</b>
             <span>${escapeHTML(style.description)}</span>
+            <span>${escapeHTML(advice.predictions[key].shortLabel)}</span>
           </button>
         `).join("")}
       </div>
+    </div>
+  `;
+}
+
+function renderPredictionPanel() {
+  const prediction = predictSeasonOutcome(state.playStyle);
+  const advice = getStrategyAdvice();
+
+  return `
+    <div class="prediction-panel">
+      <div>
+        <span class="status-pill">Prediction</span>
+        <h3>${escapeHTML(prediction.finishLabel)} | ${prediction.points} pts</h3>
+        <p>${escapeHTML(prediction.finalsForecast)}</p>
+      </div>
+      <div class="prediction-grid">
+        ${renderPredictionMetric("Best style", PLAY_STYLES[advice.bestStyle].label)}
+        ${renderPredictionMetric("Win range", `${prediction.winRange[0]}-${prediction.winRange[1]}`)}
+        ${renderPredictionMetric("Ceiling", prediction.ceiling)}
+        ${renderPredictionMetric("Risk", prediction.risk)}
+      </div>
+    </div>
+  `;
+}
+
+function renderPredictionMetric(label, value) {
+  return `
+    <div class="prediction-metric">
+      <span>${escapeHTML(label)}</span>
+      <b>${escapeHTML(String(value))}</b>
     </div>
   `;
 }
@@ -1169,6 +1281,7 @@ function renderCurrentGame(game) {
 function renderResultsPanel() {
   const result = state.seasonResult;
   const leaders = result.leaders;
+  const comparison = renderPredictionComparison(result);
 
   return `
     <section class="panel results-panel">
@@ -1199,6 +1312,7 @@ function renderResultsPanel() {
             ${renderLeader("Goal kick", result.teamRatings.goalSkill, "rating")}
           </div>
         </div>
+        ${comparison}
       </div>
       <div class="tabs">
         ${renderTab("players", "Player Stats")}
@@ -1208,6 +1322,18 @@ function renderResultsPanel() {
       </div>
       ${renderActiveResultsTab()}
     </section>
+  `;
+}
+
+function renderPredictionComparison(result) {
+  if (!result.prediction) return "";
+
+  return `
+    <div class="result-card performance-card">
+      <span class="status-pill">Forecast check</span>
+      <h2>${escapeHTML(formatPredictionDelta(result.summary, result.prediction))}</h2>
+      <p class="wheel-meta">${escapeHTML(createPerformanceBlurb(result.summary, result.prediction))}</p>
+    </div>
   `;
 }
 
@@ -1738,10 +1864,81 @@ function applyPlayStyle(teamRatings, playStyle) {
   };
 }
 
+function getStrategyAdvice() {
+  const predictions = Object.fromEntries(
+    Object.keys(PLAY_STYLES).map((styleKey) => [styleKey, predictSeasonOutcome(styleKey)])
+  );
+  const bestStyle = Object.entries(predictions)
+    .sort((a, b) => b[1].score - a[1].score || b[1].points - a[1].points || a[0].localeCompare(b[0]))[0]?.[0] || "balanced";
+  const best = predictions[bestStyle];
+
+  return {
+    bestStyle,
+    predictions,
+    summary: `Scout pick: ${PLAY_STYLES[bestStyle].label}. Projected ${best.points} pts, ${best.finishLabel.toLowerCase()}.`
+  };
+}
+
+function predictSeasonOutcome(playStyle = state.playStyle) {
+  const styled = applyPlayStyle(calculateTeamRatings(), playStyle);
+  const leagueAverage = getLeagueAverageRating();
+  const stylePush = styled.styleSynergy * 0.012;
+  const ratingEdge = (styled.overall - leagueAverage) / 28;
+  const attackDefenceBalance = 1 - Math.min(18, Math.abs(styled.attack - styled.defence)) / 90;
+  const spineKicking = clamp((styled.goalSkill - 76) / 95, -0.08, 0.12);
+  const winRate = clamp(0.5 + ratingEdge + stylePush + spineKicking + attackDefenceBalance * 0.04, 0.18, 0.84);
+  const expectedWins = clamp(Math.round(winRate * 24), 3, 21);
+  const points = expectedWins * 2;
+  const position = predictedLadderPosition(points, styled.overall);
+  const finalsForecast = predictFinalsForecast(position, styled.clutch, styled.overall);
+  const ceiling = styled.clutch >= 90 && styled.overall >= 89 ? "Premiership" : position <= 4 ? "Grand Final" : position <= 8 ? "Finals run" : "Late charge";
+  const risk = styled.defence < 80 ? "Leaky defence" : styled.attack < 80 ? "Scoring squeeze" : Math.abs(styled.attack - styled.defence) > 12 ? "Style dependent" : "Balanced";
+
+  return {
+    styleKey: playStyle,
+    teamRatings: styled,
+    score: points + styled.overall * 0.16 + styled.clutch * 0.08 + styled.styleSynergy,
+    wins: expectedWins,
+    winRange: [Math.max(0, expectedWins - 3), Math.min(24, expectedWins + 3)],
+    points,
+    position,
+    finishLabel: `${ordinal(position)} predicted`,
+    finalsForecast,
+    ceiling,
+    risk,
+    shortLabel: `${points} pts | ${ordinal(position)}`
+  };
+}
+
+function getLeagueAverageRating() {
+  const ratings = OPPONENTS.map((team) => Math.round((team.attack + team.defence + team.power + team.clutch) / 4));
+  return ratings.reduce((sum, value) => sum + value, 0) / ratings.length;
+}
+
+function predictedLadderPosition(points, overall) {
+  if (points >= 38) return overall >= 91 ? 1 : 2;
+  if (points >= 34) return overall >= 88 ? 3 : 4;
+  if (points >= 30) return overall >= 86 ? 5 : 6;
+  if (points >= 28) return 8;
+  if (points >= 24) return 10;
+  if (points >= 20) return 12;
+  if (points >= 16) return 14;
+  return 16;
+}
+
+function predictFinalsForecast(position, clutch, overall) {
+  if (position <= 2 && clutch >= 90) return "Premiership contender";
+  if (position <= 4) return overall >= 88 ? "Preliminary final quality" : "Top-four finals shot";
+  if (position <= 8) return clutch >= 87 ? "Dangerous finalist" : "Finals appearance";
+  if (position <= 10) return "Bubble team";
+  return "Unlikely finals run";
+}
+
 function simulateSeason() {
   if (!isDraftComplete()) return;
 
-  const teamRatings = applyPlayStyle(calculateTeamRatings(), state.playStyle);
+  const prediction = predictSeasonOutcome(state.playStyle);
+  const teamRatings = prediction.teamRatings;
   const userTeam = {
     id: "user",
     name: "NRL Invincible",
@@ -1813,10 +2010,11 @@ function simulateSeason() {
       }))
   ];
   const leaders = calculateLeaders(playerStats);
-  const summary = createSummary(userLadderRow, finals, regularResults);
+  const summary = createSummary(userLadderRow, finals, regularResults, prediction);
 
   const seasonResult = {
     teamRatings,
+    prediction,
     ladder,
     regularResults,
     allResults,
@@ -2347,7 +2545,7 @@ function leaderBy(playerStats, key) {
   return { name: row.name, value: row[key] };
 }
 
-function createSummary(userLadderRow, finals, regularResults) {
+function createSummary(userLadderRow, finals, regularResults, prediction) {
   const wins = regularResults.filter((row) => row.result === "W").length;
   const losses = regularResults.length - wins;
   const grandFinal = finals.find((game) => game.stage === "Grand Final" && (game.teamAId === "user" || game.teamBId === "user"));
@@ -2373,9 +2571,30 @@ function createSummary(userLadderRow, finals, regularResults) {
     losses,
     record: `${wins}-${losses}`,
     regularFinish: `${ordinal(userLadderRow.position)} on the ladder`,
+    regularPosition: userLadderRow.position,
+    regularPoints: userLadderRow.points,
     finalStatus,
-    pointsDiff: userLadderRow.diff
+    pointsDiff: userLadderRow.diff,
+    prediction
   };
+}
+
+function formatPredictionDelta(summary, prediction) {
+  const pointsDelta = summary.regularPoints - prediction.points;
+  const ladderDelta = prediction.position - summary.regularPosition;
+
+  if (pointsDelta >= 4 || ladderDelta >= 3) return "Beat the forecast";
+  if (pointsDelta <= -4 || ladderDelta <= -3) return "Below forecast";
+  return "Close to forecast";
+}
+
+function createPerformanceBlurb(summary, prediction) {
+  const pointsDelta = summary.regularPoints - prediction.points;
+  const predicted = `${prediction.finishLabel.replace(" predicted", "")}, ${prediction.points} pts, ${prediction.finalsForecast.toLowerCase()}`;
+  const actual = `${ordinal(summary.regularPosition)}, ${summary.regularPoints} pts, ${summary.finalStatus.toLowerCase()}`;
+  const pointsPhrase = pointsDelta === 0 ? "right on the projected points total" : `${Math.abs(pointsDelta)} points ${pointsDelta > 0 ? "above" : "below"} the projection`;
+
+  return `Predicted ${predicted}. You finished ${actual}, ${pointsPhrase}.`;
 }
 
 async function copySummary() {
@@ -2387,6 +2606,7 @@ async function copySummary() {
     "NRL Invincible",
     `Mode: ${state.ratingMode === "season" ? "Season form" : "Career peak"}`,
     `Style: ${result.teamRatings.styleLabel}`,
+    result.prediction ? `Prediction: ${result.prediction.finishLabel}, ${result.prediction.points} pts, ${result.prediction.finalsForecast}` : null,
     `Record: ${result.summary.record}`,
     `Regular finish: ${result.summary.regularFinish}`,
     `Finals: ${result.summary.finalStatus}`,
