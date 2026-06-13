@@ -86,12 +86,78 @@ const WEATHER_TYPES = [
   { key: "humid", label: "Humid", attack: 0.98, defence: 0.96, kicking: 0.98, tempo: 1, variance: 1.14 }
 ];
 
+const TEAM_COLOURS = {
+  Adelaide: ["#c8102e", "#f6c343"],
+  Balmain: ["#f58220", "#111111"],
+  Brisbane: ["#6f263d", "#f2a900"],
+  Canberra: ["#84bd00", "#1d428a"],
+  "Canterbury-Bankstown": ["#005eb8", "#ffffff"],
+  "Cronulla-Sutherland": ["#67b7e8", "#111111"],
+  Dolphins: ["#e2231a", "#f6c343"],
+  "Gold Coast": ["#00a3e0", "#f2a900"],
+  Illawarra: ["#d71920", "#ffffff"],
+  "Manly Warringah": ["#6f263d", "#ffffff"],
+  Melbourne: ["#512d6d", "#fdb515"],
+  Newcastle: ["#005eb8", "#c8102e"],
+  "North Queensland": ["#0b1f3a", "#f6c343"],
+  "North Sydney": ["#e2231a", "#111111"],
+  "Northern Eagles": ["#6f263d", "#ffffff"],
+  Parramatta: ["#005eb8", "#f2a900"],
+  Penrith: ["#111111", "#e2231a"],
+  "South Sydney": ["#00843d", "#e2231a"],
+  "St George": ["#e2231a", "#ffffff"],
+  "St George Illawarra": ["#e2231a", "#ffffff"],
+  "Sydney Roosters": ["#0033a0", "#e2231a"],
+  Warriors: ["#003b5c", "#00a3a1"],
+  "Wests Tigers": ["#f58220", "#111111"],
+  "Western Suburbs": ["#111111", "#ffffff"],
+  "NRL Invincible": ["#b7ef5d", "#67d8d0"]
+};
+
+const TEAM_ALIASES = {
+  Auckland: "Warriors",
+  "New Zealand Warriors": "Warriors",
+  "Sydney City": "Sydney Roosters",
+  "Eastern Suburbs": "Sydney Roosters",
+  "Gold Coast Titans": "Gold Coast",
+  "Gold Coast Seagulls": "Gold Coast",
+  Redcliffe: "Dolphins",
+  "Redcliffe Dolphins": "Dolphins",
+  St: "St George"
+};
+
+const IMMORTAL_RATINGS = ratings(100, 100, 100, 100, 100, 100, 100);
+const IMMORTAL_OFFER_CHANCE = 0.015;
+const IMMORTAL_OPPONENT_CHANCE = 0.012;
+const IMMORTAL_GRAND_FINAL_CHANCE = 0.08;
+
+const IMMORTALS = [
+  immortal("clive-churchill", "Clive Churchill", 1981, ["South Sydney"], ["fullback", "half"], "Immortal fullback"),
+  immortal("bob-fulton", "Bob Fulton", 1981, ["Manly Warringah", "Sydney Roosters"], ["centre", "half", "lock"], "Immortal backline genius"),
+  immortal("reg-gasnier", "Reg Gasnier", 1981, ["St George", "St George Illawarra"], ["centre", "fullback", "half"], "Immortal centre"),
+  immortal("johnny-raper", "Johnny Raper", 1981, ["St George", "St George Illawarra", "Western Suburbs"], ["lock", "half", "edge", "centre", "middle"], "Immortal lock"),
+  immortal("graeme-langlands", "Graeme Langlands", 1999, ["St George", "St George Illawarra"], ["fullback", "centre", "wing"], "Immortal fullback"),
+  immortal("wally-lewis", "Wally Lewis", 1999, ["Brisbane", "Gold Coast"], ["half", "lock", "centre"], "Immortal five-eighth"),
+  immortal("arthur-beetson", "Arthur Beetson", 2003, ["Balmain", "Sydney Roosters", "Parramatta", "Dolphins"], ["middle", "edge", "lock"], "Immortal forward"),
+  immortal("andrew-johns", "Andrew Johns", 2012, ["Newcastle"], ["half", "hooker"], "Immortal halfback"),
+  immortal("dave-brown", "Dave Brown", 2018, ["Sydney Roosters"], ["centre", "wing", "fullback", "half"], "Immortal centre"),
+  immortal("frank-burge", "Frank Burge", 2018, ["St George", "St George Illawarra"], ["lock", "edge", "middle", "wing", "centre", "hooker"], "Immortal forward"),
+  immortal("mal-meninga", "Mal Meninga", 2018, ["Canberra"], ["centre", "edge", "half", "wing"], "Immortal centre"),
+  immortal("dally-messenger", "Dally Messenger", 2018, ["Sydney Roosters"], ["centre", "wing", "half"], "Immortal centre"),
+  immortal("norm-provan", "Norm Provan", 2018, ["St George", "St George Illawarra"], ["edge", "lock"], "Immortal second-rower"),
+  immortal("ron-coote", "Ron Coote", 2024, ["South Sydney", "Sydney Roosters"], ["lock", "edge", "centre", "middle"], "Immortal lock")
+];
+
 function ratings(overall, attack, defence, workrate, kicking, goalKicking, bigGame) {
   return { overall, attack, defence, workrate, kicking, goalKicking, bigGame };
 }
 
 function player(id, careerId, name, season, club, positions, role, ratingSet) {
   return { id, careerId, name, season, club, positions, role, ratings: ratingSet };
+}
+
+function immortal(id, name, induction, clubs, positions, role) {
+  return { id, name, induction, clubs, positions, role };
 }
 
 const PLAYER_SEASONS = [
@@ -553,6 +619,100 @@ function normalizeNameForKey(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function slugForId(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function baseClubName(value) {
+  const raw = String(value || "")
+    .replace(/\s+\+\s+.+$/, "")
+    .replace(/^\d{4}\s+/, "")
+    .trim();
+
+  return TEAM_ALIASES[raw] || raw;
+}
+
+function sameClubName(a, b) {
+  return baseClubName(a) === baseClubName(b);
+}
+
+function splitTeamDisplay(value) {
+  const [name, immortalName] = String(value || "").split(/\s+\+\s+/, 2);
+  return {
+    name: name || "",
+    immortalName: immortalName || ""
+  };
+}
+
+function teamColours(value) {
+  const baseName = baseClubName(splitTeamDisplay(value).name);
+  return TEAM_COLOURS[baseName] || ["#d8dece", "#67d8d0"];
+}
+
+function renderTeamName(value, options = {}) {
+  const { name, immortalName } = splitTeamDisplay(value);
+  const [primary, secondary] = teamColours(name);
+  const className = options.compact ? "team-name compact" : "team-name";
+  const suffix = immortalName ? `<span class="team-immortal-mini">+ ${escapeHTML(immortalName)}</span>` : "";
+
+  return `
+    <span class="${className}">
+      <span class="team-icon" style="--team-a:${primary}; --team-b:${secondary};"></span>
+      <span class="team-text">${escapeHTML(name)}${suffix}</span>
+    </span>
+  `;
+}
+
+function rollImmortalOffer(group) {
+  const candidates = IMMORTALS
+    .filter((item) => item.clubs.some((club) => sameClubName(club, group.club)))
+    .map((item) => createImmortalPlayer(item, group.season, group.club))
+    .filter((candidate) => !state.lockedCareers.has(candidate.careerId) && getAvailableSlotsForPlayer(candidate).length);
+
+  if (!candidates.length || Math.random() > IMMORTAL_OFFER_CHANCE) return null;
+  return randomItem(candidates);
+}
+
+function rollImmortalForClub(club, chance) {
+  const candidates = IMMORTALS.filter((item) => item.clubs.some((playedClub) => sameClubName(playedClub, club)));
+  if (!candidates.length || Math.random() > chance) return null;
+  return randomItem(candidates);
+}
+
+function createImmortalPlayer(item, season, club) {
+  return {
+    id: `immortal-${item.id}-${season}-${slugForId(club)}`,
+    careerId: `immortal-${item.id}`,
+    name: item.name,
+    season,
+    club,
+    positions: [...item.positions],
+    role: item.role,
+    ratings: { ...IMMORTAL_RATINGS },
+    induction: item.induction,
+    isImmortal: true
+  };
+}
+
+function applyOpponentImmortal(team, chance) {
+  const immortalPlayer = rollImmortalForClub(team.name, chance);
+  if (!immortalPlayer) return team;
+
+  return {
+    ...team,
+    name: `${team.name} + ${immortalPlayer.name}`,
+    immortal: immortalPlayer,
+    attack: clamp(team.attack + 4, 1, 100),
+    defence: clamp(team.defence + 4, 1, 100),
+    power: clamp(team.power + 4, 1, 100),
+    clutch: clamp(team.clutch + 5, 1, 100),
+    goalSkill: clamp(Math.max(team.goalSkill, 90) + 2, 1, 100)
+  };
+}
+
 const OPPONENTS = [
   { id: "opp-brisbane", name: "Brisbane", attack: 88, defence: 84, power: 88, clutch: 86, goalSkill: 82 },
   { id: "opp-canberra", name: "Canberra", attack: 80, defence: 82, power: 84, clutch: 78, goalSkill: 79 },
@@ -786,8 +946,8 @@ function renderSlot(index) {
         <span>${escapeHTML(slot.label)}</span>
         <span class="slot-rating ${ratingClass(pick.effectiveRatings.overall)}">${pick.effectiveRatings.overall}</span>
       </div>
-      <div class="slot-name">${escapeHTML(pick.name)}</div>
-      <div class="slot-meta">${pick.season} ${escapeHTML(pick.club)} | ${escapeHTML(pick.fit.label)} | Form ${formatSigned(pick.formDelta)}</div>
+      <div class="slot-name">${escapeHTML(pick.name)}${pick.isImmortal ? ` <span class="inline-immortal">Immortal</span>` : ""}</div>
+      <div class="slot-meta">${pick.season} ${renderTeamName(pick.club, { compact: true })} | ${escapeHTML(pick.fit.label)} | Form ${formatSigned(pick.formDelta)}</div>
     </div>
   `;
 }
@@ -820,6 +980,7 @@ function renderIntroPanel() {
         <p>Spin a random NRL club-season from 1998-2025, choose one squad player, then place him into an open position.</p>
         <p>Natural positions play best. Secondary and cover roles work, but the player takes a performance hit.</p>
         <p>You get one re-roll for the whole run. After the XIII is full, choose a style and simulate the season.</p>
+        <p>Very rarely, an Immortal can appear for a club he played for. He is rated 100, but form and fit still matter.</p>
       </div>
     </div>
   `;
@@ -875,7 +1036,7 @@ function renderSpinStage() {
   return `
     <div class="wheel-card">
       <div class="next-slot">${getOpenSlots().length} open positions | Re-roll ${state.rerollUsed ? "used" : "available"}</div>
-      <h2 class="wheel-title">${state.currentOffer.season} ${escapeHTML(state.currentOffer.club)}</h2>
+      <h2 class="wheel-title">${state.currentOffer.season} ${renderTeamName(state.currentOffer.club)}</h2>
       <p class="wheel-meta">${state.currentOffer.eligibleCount} squad players fit at least one open position. Choose a player and slot.</p>
     </div>
     <div class="candidate-grid squad-grid">
@@ -885,7 +1046,7 @@ function renderSpinStage() {
 }
 
 function renderCandidateCard(candidate) {
-  const career = careerProfiles.get(candidate.careerId);
+  const career = careerProfiles.get(candidate.careerId) || { peakOverall: candidate.ratings.overall, peakRatings: candidate.ratings };
   const effective = getEffectiveRatings(candidate);
   const seasonOverall = candidate.ratings.overall;
   const careerOverall = career.peakOverall;
@@ -895,16 +1056,17 @@ function renderCandidateCard(candidate) {
   const availableSlots = getAvailableSlotsForPlayer(candidate);
 
   return `
-    <article class="player-card ${availability.canPick ? "" : "unavailable"}">
+    <article class="player-card ${candidate.isImmortal ? "immortal" : ""} ${availability.canPick ? "" : "unavailable"}">
       <div>
         <div class="player-top">
           <div>
-            <div class="player-name">${escapeHTML(candidate.name)}</div>
-            <div class="player-sub">${candidate.season} ${escapeHTML(candidate.club)} | ${escapeHTML(candidate.role)}</div>
+            <div class="player-name">${escapeHTML(candidate.name)}${candidate.isImmortal ? ` <span class="inline-immortal">Immortal</span>` : ""}</div>
+            <div class="player-sub">${candidate.season} ${renderTeamName(candidate.club, { compact: true })} | ${escapeHTML(candidate.role)}</div>
           </div>
           <div class="rating-badge ${ratingClass(effective.overall)}">${effective.overall}</div>
         </div>
         <div class="tags">
+          ${candidate.isImmortal ? `<span class="tag immortal-tag">Immortal</span><span class="tag immortal-tag">Inducted ${candidate.induction}</span>` : ""}
           ${candidate.positions.map((position) => `<span class="tag">${POSITION_LABELS[position]}</span>`).join("")}
           ${alternatePositions.map((position) => `<span class="tag alt">${POSITION_LABELS[position]}</span>`).join("")}
           <span class="tag">Season ${seasonOverall}</span>
@@ -979,7 +1141,7 @@ function renderSimulationPanel() {
               <tr>
                 <td>${Math.max(1, completed.length - 11) + index}</td>
                 <td>${escapeHTML(row.stage)}</td>
-                <td>${escapeHTML(row.opponent)}</td>
+                <td>${renderTeamName(row.opponent, { compact: true })}</td>
                 <td>${row.userScore}-${row.oppScore}</td>
                 <td class="${resultClass(row)}">${row.result}</td>
               </tr>
@@ -996,7 +1158,7 @@ function renderCurrentGame(game) {
     <div class="sim-game-card ${resultClass(game)}">
       <span class="status-pill">${escapeHTML(game.stage)}</span>
       <h2>${game.userScore}-${game.oppScore}</h2>
-      <p class="sim-opponent">v ${escapeHTML(game.opponent)}</p>
+      <p class="sim-opponent">v ${renderTeamName(game.opponent)}</p>
       <p class="sim-weather">${escapeHTML(game.weather?.label || "Dry")} conditions</p>
       <p class="sim-result ${resultClass(game)}">${game.result === "W" ? "Win" : "Loss"}</p>
       <p class="sim-scorers">${escapeHTML(formatScorerLine(game))}</p>
@@ -1130,7 +1292,7 @@ function renderPlayerStatsTable() {
         <tbody>
           ${rows.map((row) => `
             <tr>
-              <td>${escapeHTML(row.name)}</td>
+              <td>${escapeHTML(row.name)}${row.isImmortal ? ` <span class="inline-immortal">Immortal</span>` : ""}</td>
               <td>${escapeHTML(row.slotLabel)}</td>
               <td>${row.games}</td>
               <td>${row.tries}</td>
@@ -1170,7 +1332,7 @@ function renderLadderTable() {
           ${state.seasonResult.ladder.map((row, index) => `
             <tr>
               <td>${index + 1}</td>
-              <td>${row.id === "user" ? "<b>NRL Invincible</b>" : escapeHTML(row.name)}</td>
+              <td>${row.id === "user" ? `<b>${renderTeamName("NRL Invincible", { compact: true })}</b>` : renderTeamName(row.name, { compact: true })}</td>
               <td>${row.played}</td>
               <td>${row.wins}</td>
               <td>${row.losses}</td>
@@ -1207,7 +1369,7 @@ function renderMatchResultsTable() {
               <td>${index + 1}</td>
               <td>${escapeHTML(row.stage)}</td>
               <td>${escapeHTML(row.weather?.label || "Dry")}</td>
-              <td>${escapeHTML(row.opponent)}</td>
+              <td>${renderTeamName(row.opponent, { compact: true })}</td>
               <td>${row.userScore}-${row.oppScore}</td>
               <td class="${resultClass(row)}">${row.result}</td>
               <td class="scorer-cell">${escapeHTML(formatTryScorers(row.tryScorers))}</td>
@@ -1235,9 +1397,9 @@ function renderFinalsTable() {
           ${state.seasonResult.finals.map((row) => `
             <tr>
               <td>${escapeHTML(row.stage)}</td>
-              <td>${escapeHTML(row.teamA)} v ${escapeHTML(row.teamB)}</td>
+              <td>${renderTeamName(row.teamA, { compact: true })} v ${renderTeamName(row.teamB, { compact: true })}</td>
               <td>${row.scoreA}-${row.scoreB}</td>
-              <td>${row.winnerId === "user" ? "<b>NRL Invincible</b>" : escapeHTML(row.winner)}</td>
+              <td>${row.winnerId === "user" ? `<b>${renderTeamName("NRL Invincible", { compact: true })}</b>` : renderTeamName(row.winner, { compact: true })}</td>
             </tr>
           `).join("")}
         </tbody>
@@ -1297,7 +1459,9 @@ function spinOffer() {
   }
 
   const group = randomItem(groups);
-  const squad = group.squad
+  const immortalOffer = rollImmortalOffer(group);
+  const groupSquad = immortalOffer ? [...group.squad, immortalOffer] : group.squad;
+  const squad = groupSquad
     .map((candidate) => ({
       candidate,
       availability: getPlayerAvailability(candidate),
@@ -1447,7 +1611,8 @@ function getPositionFit(candidate, slotKey) {
 
 function applyPositionFitToRatings(ratings, fit) {
   const multiplier = fit.multiplier;
-  const adjust = (value, severity = 1) => clamp(Math.round(value - (100 - value) * 0.04 - (1 - multiplier) * 100 * severity), 42, 99);
+  const maxRating = ratings.overall >= 100 ? 100 : 99;
+  const adjust = (value, severity = 1) => clamp(Math.round(value - (100 - value) * 0.04 - (1 - multiplier) * 100 * severity), 42, maxRating);
 
   return {
     overall: adjust(ratings.overall, 1.05),
@@ -1473,12 +1638,13 @@ function getEffectivePositions(candidate) {
 }
 
 function getEffectiveRatings(candidate) {
-  const source = state.ratingMode === "career" ? careerProfiles.get(candidate.careerId).peakRatings : candidate.ratings;
+  const profile = careerProfiles.get(candidate.careerId);
+  const source = state.ratingMode === "career" && profile ? profile.peakRatings : candidate.ratings;
   return spreadRatings(source);
 }
 
 function spreadRatings(ratingSet) {
-  const spread = (value) => clamp(Math.round(80 + (value - 82) * 1.42), 48, 99);
+  const spread = (value) => (value >= 100 ? 100 : clamp(Math.round(80 + (value - 82) * 1.42), 48, 99));
 
   return {
     overall: spread(ratingSet.overall),
@@ -1494,10 +1660,11 @@ function spreadRatings(ratingSet) {
 function rollSeasonRatings(baseRatings) {
   const formDelta = clamp(Math.round(randomNormal() * 6.5 + (baseRatings.overall - 84) * 0.08), -15, 15);
   const adjusted = {};
+  const maxRating = baseRatings.overall >= 100 ? 100 : 99;
 
   for (const [key, value] of Object.entries(baseRatings)) {
     const attributeNoise = key === "overall" ? 0 : randomNormal() * 2.2;
-    adjusted[key] = clamp(Math.round(value + formDelta + attributeNoise), 45, 99);
+    adjusted[key] = clamp(Math.round(value + formDelta + attributeNoise), 45, maxRating);
   }
 
   adjusted.overall = Math.round((adjusted.attack + adjusted.defence + adjusted.workrate + adjusted.kicking + adjusted.bigGame) / 5);
@@ -1505,6 +1672,7 @@ function rollSeasonRatings(baseRatings) {
 }
 
 function ratingClass(value) {
+  if (value >= 100) return "rating-immortal";
   if (value >= 90) return "rating-red";
   if (value >= 85) return "rating-orange";
   if (value >= 80) return "rating-yellow";
@@ -1585,7 +1753,7 @@ function simulateSeason() {
     tempo: teamRatings.tempo
   };
 
-  const teams = [userTeam, ...OPPONENTS.map((team) => ({ ...team }))];
+  const teams = [userTeam, ...OPPONENTS.map((team) => applyOpponentImmortal({ ...team }, IMMORTAL_OPPONENT_CHANCE))];
   const teamMap = new Map(teams.map((team) => [team.id, team]));
   const ladderMap = new Map(teams.map((team) => [team.id, createLadderRow(team)]));
   const playerStats = createPlayerStats();
@@ -1672,6 +1840,7 @@ async function startSimulationReveal(seasonResult) {
     currentGame: null
   };
   render();
+  scrollToLiveGames();
 
   await delay(450);
 
@@ -1689,6 +1858,18 @@ async function startSimulationReveal(seasonResult) {
   state.phase = "results";
   state.simulationReveal = null;
   render();
+  scrollToLiveGames();
+}
+
+function scrollToLiveGames() {
+  if (!window.matchMedia?.("(max-width: 760px)").matches) return;
+
+  window.setTimeout(() => {
+    const panel = document.querySelector(".results-panel");
+    if (!panel) return;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    panel.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+  }, 50);
 }
 
 function revealDelay(game) {
@@ -1887,7 +2068,8 @@ function createPlayerStats() {
     mvpVotes: 0,
     ratings: getSimulationRatings(pick),
     baseRatings: pick.effectiveRatings,
-    formDelta: pick.formDelta || 0
+    formDelta: pick.formDelta || 0,
+    isImmortal: Boolean(pick.isImmortal)
   }));
 }
 
@@ -2128,7 +2310,7 @@ function simulateUserFinalsPath(ladder, teamMap, playerStats, userPosition) {
     if (match.winnerId !== "user") return finals;
   }
 
-  const grandFinalOpponent = { ...randomItem(GRAND_FINAL_WINNERS), tempo: 1 };
+  const grandFinalOpponent = applyOpponentImmortal({ ...randomItem(GRAND_FINAL_WINNERS), tempo: 1 }, IMMORTAL_GRAND_FINAL_CHANCE);
   playFinalMatch(finals, "Grand Final", userTeam, grandFinalOpponent, playerStats);
 
   return finals;
@@ -2144,7 +2326,7 @@ function simulateNeutralFinals(topEight, teamMap, playerStats) {
   const sf2 = playFinalMatch(finals, "Semi Final", qf2.loserTeam, ef1.winnerTeam, playerStats);
   const pf1 = playFinalMatch(finals, "Preliminary Final", qf2.winnerTeam, sf1.winnerTeam, playerStats);
   const pf2 = playFinalMatch(finals, "Preliminary Final", qf1.winnerTeam, sf2.winnerTeam, playerStats);
-  const grandFinalOpponent = { ...randomItem(GRAND_FINAL_WINNERS), tempo: 1 };
+  const grandFinalOpponent = applyOpponentImmortal({ ...randomItem(GRAND_FINAL_WINNERS), tempo: 1 }, IMMORTAL_GRAND_FINAL_CHANCE);
   playFinalMatch(finals, "Grand Final", pf1.winnerTeam, grandFinalOpponent, playerStats);
 
   return finals;
