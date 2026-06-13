@@ -456,7 +456,10 @@ h1 {
 }
 
 .mode-button {
+  display: grid;
+  place-items: center;
   min-height: 34px;
+  padding: 5px 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: #111713;
@@ -464,6 +467,20 @@ h1 {
   cursor: pointer;
   font-weight: 900;
   font-size: 11px;
+}
+
+.mode-button small {
+  margin-top: 1px;
+  color: var(--gold);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mode-button.active small {
+  color: #fff1b9;
 }
 
 .intro-panel {

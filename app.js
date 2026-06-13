@@ -843,7 +843,7 @@ const app = document.querySelector("#app");
 
 const state = {
   phase: "draft",
-  ratingMode: "season",
+  ratingMode: "career",
   playStyle: "balanced",
   drafted: [],
   lockedCareers: new Set(),
@@ -1039,7 +1039,10 @@ function renderDraftPanel() {
         <span class="mini">${state.ratingMode === "season" ? "Season form" : "Career peak"}</span>
       </div>
       <div class="mode-bar">
-        <button class="mode-button ${state.ratingMode === "season" ? "active" : ""}" data-action="set-mode" data-mode="season" ${state.drafted.length ? "disabled" : ""}>Season Form</button>
+        <button class="mode-button ${state.ratingMode === "season" ? "active" : ""}" data-action="set-mode" data-mode="season" ${state.drafted.length ? "disabled" : ""}>
+          <span>Season Form</span>
+          <small>Hard Mode</small>
+        </button>
         <button class="mode-button ${state.ratingMode === "career" ? "active" : ""}" data-action="set-mode" data-mode="career" ${state.drafted.length ? "disabled" : ""}>Career Peak</button>
       </div>
       ${!state.drafted.length && !state.currentOffer ? renderIntroPanel() : ""}
@@ -1647,7 +1650,7 @@ function draftPlayer(playerId, slotIndex) {
 function resetGame() {
   activeRevealToken += 1;
   state.phase = "draft";
-  state.ratingMode = "season";
+  state.ratingMode = "career";
   state.playStyle = "balanced";
   state.drafted = [];
   state.lockedCareers = new Set();
