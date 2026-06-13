@@ -1802,7 +1802,23 @@ function ratingClass(value) {
 
 function calculateTeamRatings() {
   if (!state.drafted.length) {
-    return { overall: 0, attack: 0, defence: 0, power: 0, clutch: 0, goalSkill: 0 };
+    return {
+      overall: 0,
+      attack: 0,
+      defence: 0,
+      power: 0,
+      clutch: 0,
+      goalSkill: 0,
+      spine: 0,
+      backs: 0,
+      pack: 0,
+      weakLink: 0,
+      fitScore: 0,
+      secondaryPicks: 0,
+      eliteCount: 0,
+      volatility: 0,
+      balanceGap: 0
+    };
   }
 
   const picks = state.drafted;
@@ -1810,18 +1826,49 @@ function calculateTeamRatings() {
     const source = items.length ? items : picks;
     return Math.round(source.reduce((sum, item) => sum + getSimulationRatings(item)[key], 0) / source.length);
   };
+  const avgOverall = (items = picks) => {
+    const source = items.length ? items : picks;
+    return Math.round(source.reduce((sum, item) => sum + getSimulationRatings(item).overall, 0) / source.length);
+  };
   const spine = picks.filter((item) => ["fullback", "half", "hooker"].includes(item.slotKey));
+  const backs = picks.filter((item) => ["fullback", "wing", "centre", "half"].includes(item.slotKey));
   const forwards = picks.filter((item) => ["edge", "middle", "lock", "hooker"].includes(item.slotKey));
   const middles = picks.filter((item) => ["middle", "lock"].includes(item.slotKey));
+  const sortedOverall = picks.map((item) => getSimulationRatings(item).overall).sort((a, b) => a - b);
+  const bottomThree = sortedOverall.slice(0, Math.min(3, sortedOverall.length));
+  const fitScore = Math.round(picks.reduce((sum, item) => sum + (item.fit?.multiplier || 1), 0) / picks.length * 100);
+  const secondaryPicks = picks.filter((item) => item.fit?.level && item.fit.level !== "natural").length;
+  const eliteCount = sortedOverall.filter((value) => value >= 90).length;
+  const volatility = Math.round(picks.reduce((sum, item) => sum + Math.abs(item.formDelta || 0), 0) / picks.length);
 
-  const attack = Math.round(avg("attack") * 0.72 + avg("attack", spine) * 0.2 + avg("kicking", spine) * 0.08);
+  const attack = Math.round(avg("attack") * 0.56 + avg("attack", spine) * 0.24 + avg("kicking", spine) * 0.1 + avg("attack", backs) * 0.1);
   const defence = Math.round(avg("defence") * 0.72 + avg("defence", forwards) * 0.22 + avg("workrate", forwards) * 0.06);
   const power = Math.round(avg("workrate") * 0.46 + avg("attack", middles.length ? middles : forwards) * 0.26 + avg("defence", forwards) * 0.28);
   const clutch = Math.round(avg("bigGame"));
   const goalSkill = Math.max(...picks.map((item) => getSimulationRatings(item).goalKicking));
-  const overall = Math.round((attack + defence + power + clutch) / 4);
+  const weakLink = Math.round(bottomThree.reduce((sum, value) => sum + value, 0) / bottomThree.length);
+  const weakLinkPenalty = Math.max(0, 83 - weakLink) * 0.18;
+  const fitAdjustment = (fitScore - 96) * 0.06;
+  const balanceGap = Math.max(attack, defence, power) - Math.min(attack, defence, power);
+  const overall = clamp(Math.round((attack + defence + power + clutch) / 4 + fitAdjustment - weakLinkPenalty), 1, 100);
 
-  return { overall, attack, defence, power, clutch, goalSkill };
+  return {
+    overall,
+    attack,
+    defence,
+    power,
+    clutch,
+    goalSkill,
+    spine: avgOverall(spine),
+    backs: avgOverall(backs),
+    pack: avgOverall(forwards),
+    weakLink,
+    fitScore,
+    secondaryPicks,
+    eliteCount,
+    volatility,
+    balanceGap
+  };
 }
 
 function getSimulationRatings(pick) {
@@ -1833,15 +1880,18 @@ function applyPlayStyle(teamRatings, playStyle) {
   const forwardBase = Math.round((teamRatings.defence + teamRatings.power) / 2);
   const attackEdge = Math.max(0, teamRatings.attack - forwardBase);
   const defenceEdge = Math.max(0, forwardBase - teamRatings.attack);
-  const balanceGap = Math.max(teamRatings.attack, teamRatings.defence, teamRatings.power) - Math.min(teamRatings.attack, teamRatings.defence, teamRatings.power);
-  const balanceBonus = playStyle === "balanced" ? Math.max(0, 4 - Math.floor(balanceGap / 3)) : 0;
-  const attackSynergy = playStyle === "attacking" ? Math.min(5, Math.floor(attackEdge / 2)) : 0;
-  const defenceSynergy = playStyle === "defensive" ? Math.min(5, Math.floor(defenceEdge / 2)) : 0;
-  const attack = clamp(teamRatings.attack + style.attack + attackSynergy + balanceBonus, 1, 99);
-  const defence = clamp(teamRatings.defence + style.defence + defenceSynergy + balanceBonus, 1, 99);
-  const power = clamp(teamRatings.power + style.power + Math.floor(defenceSynergy / 2) + balanceBonus, 1, 99);
-  const clutch = clamp(teamRatings.clutch + style.clutch + Math.floor((attackSynergy + defenceSynergy + balanceBonus) / 2), 1, 99);
-  const overall = Math.round((attack + defence + power + clutch) / 4);
+  const balanceGap = teamRatings.balanceGap ?? Math.max(teamRatings.attack, teamRatings.defence, teamRatings.power) - Math.min(teamRatings.attack, teamRatings.defence, teamRatings.power);
+  const styleFit = calculateStyleFit(teamRatings, playStyle);
+  const positiveFit = Math.max(0, styleFit);
+  const negativeFit = Math.min(0, styleFit);
+  const balanceBonus = playStyle === "balanced" ? Math.max(0, 3.5 - balanceGap * 0.32) : 0;
+  const attackSynergy = playStyle === "attacking" ? Math.min(6, attackEdge * 0.28 + positiveFit * 0.45) : 0;
+  const defenceSynergy = playStyle === "defensive" ? Math.min(6, defenceEdge * 0.28 + positiveFit * 0.45) : 0;
+  const attack = clamp(Math.round(teamRatings.attack + style.attack + attackSynergy + balanceBonus + negativeFit * 0.25), 1, 100);
+  const defence = clamp(Math.round(teamRatings.defence + style.defence + defenceSynergy + balanceBonus + negativeFit * 0.25), 1, 100);
+  const power = clamp(Math.round(teamRatings.power + style.power + defenceSynergy * 0.35 + balanceBonus + negativeFit * 0.15), 1, 100);
+  const clutch = clamp(Math.round(teamRatings.clutch + style.clutch + (attackSynergy + defenceSynergy + balanceBonus + positiveFit) * 0.22), 1, 100);
+  const overall = clamp(Math.round((attack + defence + power + clutch) / 4 + styleFit * 0.22), 1, 100);
 
   return {
     ...teamRatings,
@@ -1851,10 +1901,43 @@ function applyPlayStyle(teamRatings, playStyle) {
     power,
     clutch,
     tempo: style.tempo,
-    styleSynergy: attackSynergy + defenceSynergy + balanceBonus,
+    styleSynergy: styleFit,
     styleKey: playStyle,
     styleLabel: style.label
   };
+}
+
+function calculateStyleFit(teamRatings, playStyle) {
+  const balanceGap = teamRatings.balanceGap ?? 0;
+  const fitDrag = Math.max(0, 96 - (teamRatings.fitScore || 96)) * 0.08 + (teamRatings.secondaryPicks || 0) * 0.16;
+  const weakDrag = Math.max(0, 84 - (teamRatings.weakLink || 84)) * 0.11;
+  let raw = 0;
+
+  if (playStyle === "attacking") {
+    raw =
+      (teamRatings.attack - teamRatings.defence) * 0.24 +
+      (teamRatings.spine - teamRatings.pack) * 0.15 +
+      (teamRatings.backs - 83) * 0.06 +
+      (teamRatings.goalSkill - 82) * 0.035 -
+      Math.max(0, 84 - teamRatings.defence) * 0.18 -
+      fitDrag * 0.6;
+  } else if (playStyle === "defensive") {
+    raw =
+      (teamRatings.defence - teamRatings.attack) * 0.24 +
+      (teamRatings.pack - teamRatings.spine) * 0.13 +
+      (teamRatings.power - 83) * 0.08 -
+      Math.max(0, 81 - teamRatings.attack) * 0.16 -
+      weakDrag * 0.5;
+  } else {
+    raw =
+      2.2 -
+      balanceGap * 0.22 +
+      Math.max(0, (teamRatings.fitScore || 96) - 94) * 0.08 +
+      Math.max(0, (teamRatings.weakLink || 84) - 82) * 0.04 -
+      Math.max(0, balanceGap - 12) * 0.08;
+  }
+
+  return clamp(Math.round(raw * 10) / 10, -5, 7);
 }
 
 function getStrategyAdvice() {
@@ -1868,31 +1951,72 @@ function getStrategyAdvice() {
   return {
     bestStyle,
     predictions,
-    summary: `Scout pick: ${PLAY_STYLES[bestStyle].label}. Projected ${best.points} pts, ${best.finishLabel.toLowerCase()}.`
+    summary: `Scout pick: ${PLAY_STYLES[bestStyle].label}. ${strategyReason(bestStyle, best.teamRatings)} Projected ${best.points} pts, ${best.finishLabel.toLowerCase()}.`
   };
 }
 
+function strategyReason(styleKey, ratings) {
+  if (styleKey === "attacking") {
+    return ratings.spine >= ratings.pack + 3
+      ? "Spine and strike players should carry the side."
+      : "Attack rates as the clearest edge.";
+  }
+
+  if (styleKey === "defensive") {
+    return ratings.pack >= ratings.spine + 2
+      ? "Pack and defence are the strongest base."
+      : "Defence gives this XIII the best floor.";
+  }
+
+  return ratings.balanceGap <= 6
+    ? "The squad is well balanced across attack, defence and power."
+    : "Balanced limits the weak spots better than chasing upside.";
+}
+
 function predictSeasonOutcome(playStyle = state.playStyle) {
-  const styled = applyPlayStyle(calculateTeamRatings(), playStyle);
+  const baseRatings = calculateTeamRatings();
+  const styled = applyPlayStyle(baseRatings, playStyle);
   const leagueAverage = getLeagueAverageRating();
-  const stylePush = styled.styleSynergy * 0.012;
-  const ratingEdge = (styled.overall - leagueAverage) / 28;
-  const attackDefenceBalance = 1 - Math.min(18, Math.abs(styled.attack - styled.defence)) / 90;
-  const spineKicking = clamp((styled.goalSkill - 76) / 95, -0.08, 0.12);
-  const winRate = clamp(0.5 + ratingEdge + stylePush + spineKicking + attackDefenceBalance * 0.04, 0.18, 0.84);
-  const expectedWins = clamp(Math.round(winRate * 24), 3, 21);
+  const weakLinkPenalty = Math.max(0, 84 - styled.weakLink) * 0.2;
+  const fitAdjustment = (styled.fitScore - 96) * 0.08;
+  const volatilityPenalty = Math.max(0, styled.volatility - 5) * 0.16;
+  const styleAdjustment = styled.styleSynergy * 0.45;
+  const imbalancePenalty = Math.max(0, styled.balanceGap - 11) * 0.09;
+  const eliteBonus = Math.min(1.5, styled.eliteCount * 0.16);
+  const goalBonus = clamp((styled.goalSkill - 82) * 0.055, -0.5, 0.9);
+  const expectedWinsRaw =
+    12 +
+    (styled.overall - leagueAverage) * 0.54 +
+    (styled.clutch - leagueAverage) * 0.12 +
+    styleAdjustment +
+    fitAdjustment +
+    eliteBonus +
+    goalBonus -
+    weakLinkPenalty -
+    volatilityPenalty -
+    imbalancePenalty;
+  const eliteCeiling = styled.eliteCount >= 12 && styled.weakLink >= 90 && styled.fitScore >= 98;
+  const styleCeiling = styled.styleSynergy >= 2.5 && styled.weakLink >= 84 && styled.overall >= 90;
+  const mismatchCap = styled.styleSynergy <= -1.5 ? 20 : 21;
+  const expectedWinsCap = eliteCeiling || styleCeiling ? mismatchCap : Math.min(20, mismatchCap);
+  const expectedWins = clamp(Math.round(expectedWinsRaw), 4, expectedWinsCap);
   const points = expectedWins * 2;
-  const position = predictedLadderPosition(points, styled.overall);
-  const finalsForecast = predictFinalsForecast(position, styled.clutch, styled.overall);
-  const ceiling = styled.clutch >= 90 && styled.overall >= 89 ? "Premiership" : position <= 4 ? "Grand Final" : position <= 8 ? "Finals run" : "Late charge";
-  const risk = styled.defence < 80 ? "Leaky defence" : styled.attack < 80 ? "Scoring squeeze" : Math.abs(styled.attack - styled.defence) > 12 ? "Style dependent" : "Balanced";
+  const position = predictedLadderPosition(points, styled);
+  const finalsForecast = predictFinalsForecast(position, styled.clutch, styled.overall, styled.styleSynergy);
+  const rangeWidth = clamp(Math.round(1.2 + styled.volatility * 0.2 + styled.secondaryPicks * 0.18 + Math.max(0, 86 - styled.weakLink) * 0.11 + styled.balanceGap * 0.06), 2, 5);
+  const rangeCeiling = eliteCeiling || styleCeiling ? 23 : 22;
+  const winRange = [Math.max(0, expectedWins - rangeWidth), Math.min(rangeCeiling, expectedWins + rangeWidth)];
+  const ceilingWins = winRange[1] + (styled.clutch >= 90 ? 1 : 0);
+  const ceiling = ceilingWins >= 20 && styled.overall >= 88 ? "Premiership" : ceilingWins >= 18 ? "Grand Final" : ceilingWins >= 14 ? "Finals run" : "Late charge";
+  const risk = predictionRiskLabel(styled, playStyle, rangeWidth);
 
   return {
     styleKey: playStyle,
     teamRatings: styled,
-    score: points + styled.overall * 0.16 + styled.clutch * 0.08 + styled.styleSynergy,
+    score: expectedWinsRaw * 2 + styled.overall * 0.12 + styled.clutch * 0.08 + styled.styleSynergy * 0.9 - rangeWidth * 0.4,
     wins: expectedWins,
-    winRange: [Math.max(0, expectedWins - 3), Math.min(24, expectedWins + 3)],
+    expectedWinsRaw,
+    winRange,
     points,
     position,
     finishLabel: `${ordinal(position)} predicted`,
@@ -1909,22 +2033,43 @@ function getLeagueAverageRating() {
 }
 
 function predictedLadderPosition(points, overall) {
-  if (points >= 38) return overall >= 91 ? 1 : 2;
-  if (points >= 34) return overall >= 88 ? 3 : 4;
-  if (points >= 30) return overall >= 86 ? 5 : 6;
-  if (points >= 28) return 8;
-  if (points >= 24) return 10;
-  if (points >= 20) return 12;
-  if (points >= 16) return 14;
+  const rating = typeof overall === "number" ? overall : overall.overall;
+  const clutch = typeof overall === "number" ? overall : overall.clutch;
+  const tiebreak = (rating - 84) * 0.55 + (clutch - 84) * 0.18;
+  const adjusted = points + tiebreak;
+
+  if (adjusted >= 40) return 1;
+  if (adjusted >= 37) return 2;
+  if (adjusted >= 35) return 3;
+  if (adjusted >= 33) return 4;
+  if (adjusted >= 31) return 5;
+  if (adjusted >= 29) return 6;
+  if (adjusted >= 27) return 7;
+  if (adjusted >= 25) return 8;
+  if (adjusted >= 23) return 9;
+  if (adjusted >= 21) return 10;
+  if (adjusted >= 19) return 12;
+  if (adjusted >= 16) return 14;
   return 16;
 }
 
-function predictFinalsForecast(position, clutch, overall) {
-  if (position <= 2 && clutch >= 90) return "Premiership contender";
+function predictFinalsForecast(position, clutch, overall, styleSynergy = 0) {
+  if (position <= 2 && clutch >= 90 && overall >= 88) return styleSynergy >= 3 ? "Premiership favourite" : "Premiership contender";
   if (position <= 4) return overall >= 88 ? "Preliminary final quality" : "Top-four finals shot";
   if (position <= 8) return clutch >= 87 ? "Dangerous finalist" : "Finals appearance";
   if (position <= 10) return "Bubble team";
   return "Unlikely finals run";
+}
+
+function predictionRiskLabel(styled, playStyle, rangeWidth) {
+  if (styled.weakLink < 80) return "Weak links";
+  if (styled.fitScore < 94) return "Fit risk";
+  if (styled.defence < 80 || (playStyle === "attacking" && styled.defence < 84)) return "Leaky defence";
+  if (styled.attack < 80 || (playStyle === "defensive" && styled.attack < 83)) return "Scoring squeeze";
+  if (styled.power < 80) return "Soft middle";
+  if (rangeWidth >= 5 || styled.volatility >= 8) return "High variance";
+  if (Math.abs(styled.attack - styled.defence) > 11) return "Style dependent";
+  return "Balanced";
 }
 
 function simulateSeason() {
