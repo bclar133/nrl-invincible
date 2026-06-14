@@ -851,11 +851,13 @@ const state = {
   currentOffer: null,
   activeResultTab: "players",
   simulationReveal: null,
+  pendingSpeech: null,
   seasonResult: null
 };
 
 const careerProfiles = buildCareerProfiles();
 let activeRevealToken = 0;
+let pendingSpeechResolve = null;
 
 render();
 
@@ -1221,6 +1223,7 @@ function renderRatingRow(label, value) {
 function renderSimulationPanel() {
   const reveal = state.simulationReveal || { games: [], index: 0, completedGames: [] };
   const current = reveal.currentGame;
+  const pendingSpeech = state.pendingSpeech;
   const completed = reveal.completedGames || [];
   const total = reveal.games.length || 1;
   const progress = Math.round(((completed.length + (current ? 1 : 0)) / total) * 100);
@@ -1232,7 +1235,7 @@ function renderSimulationPanel() {
         <span class="mini">${completed.length + (current ? 1 : 0)}/${total}</span>
       </div>
       <div class="simulation-stage">
-        ${current ? renderCurrentGame(current) : `
+        ${pendingSpeech ? renderGrandFinalSpeech(pendingSpeech) : current ? renderCurrentGame(current) : `
           <div class="sim-game-card">
             <span class="status-pill">Kick-off</span>
             <h2>Loading Round 1</h2>
@@ -1266,6 +1269,25 @@ function renderSimulationPanel() {
         </table>
       </div>
     </section>
+  `;
+}
+
+function renderGrandFinalSpeech(prompt) {
+  return `
+    <div class="sim-game-card speech-card">
+      <span class="status-pill">Grand Final</span>
+      <h2>Pre-game Speech</h2>
+      <p class="sim-opponent">v ${renderTeamName(prompt.opponent)}</p>
+      <p class="sim-scorers">${escapeHTML(prompt.intro)}</p>
+      <div class="speech-options">
+        ${prompt.options.map((option) => `
+          <button class="button primary speech-button" data-action="speech" data-speech="${option.key}">
+            <span>${escapeHTML(option.label)}</span>
+            <small>${escapeHTML(option.text)}</small>
+          </button>
+        `).join("")}
+      </div>
+    </div>
   `;
 }
 
@@ -1363,6 +1385,10 @@ function formatTryScorers(scorers = []) {
 function formatScorerLine(game) {
   const parts = [`Tries: ${formatTryScorers(game.tryScorers)}`];
 
+  if (game.speechOutcome) {
+    parts.push(`Speech: ${game.speechOutcome} (${formatSigned(game.speechEffect)})`);
+  }
+
   if (game.fieldGoalScorers?.length) {
     parts.push(`FG: ${game.fieldGoalScorers.join(", ")}`);
   }
@@ -1411,6 +1437,7 @@ function renderPlayerStatsTable() {
             <th>G</th>
             <th>Tries</th>
             <th>Goals</th>
+            <th>G%</th>
             <th>FG</th>
             <th>2FG</th>
             <th>Pts</th>
@@ -1427,6 +1454,7 @@ function renderPlayerStatsTable() {
               <td>${row.games}</td>
               <td>${row.tries}</td>
               <td>${row.goals}</td>
+              <td>${formatGoalPercentage(row)}</td>
               <td>${row.fieldGoals}</td>
               <td>${row.twoPointFieldGoals}</td>
               <td>${row.points}</td>
@@ -1551,6 +1579,7 @@ function handleAction(event) {
   if (action === "spin") spinOffer();
   if (action === "reroll") rerollOffer();
   if (action === "draft") draftPlayer(target.dataset.playerId, Number(target.dataset.slotIndex));
+  if (action === "speech") chooseGrandFinalSpeech(target.dataset.speech);
   if (action === "simulate") simulateSeason();
   if (action === "reset") resetGame();
   if (action === "set-mode") setRatingMode(target.dataset.mode);
@@ -1608,6 +1637,7 @@ function spinOffer() {
     eligibleCount: squad.filter((candidate) => getPlayerAvailability(candidate).canPick).length
   };
   render();
+  scrollToTopRatedPlayer();
 }
 
 function rerollOffer() {
@@ -1645,10 +1675,14 @@ function draftPlayer(playerId, slotIndex) {
   state.lockedCareers.add(candidate.careerId);
   state.currentOffer = null;
   render();
+  scrollToSelectedXiii();
 }
 
 function resetGame() {
   activeRevealToken += 1;
+  if (pendingSpeechResolve) {
+    pendingSpeechResolve(null);
+  }
   state.phase = "draft";
   state.ratingMode = "career";
   state.playStyle = "balanced";
@@ -1658,7 +1692,9 @@ function resetGame() {
   state.currentOffer = null;
   state.activeResultTab = "players";
   state.simulationReveal = null;
+  state.pendingSpeech = null;
   state.seasonResult = null;
+  pendingSpeechResolve = null;
   render();
 }
 
@@ -2138,17 +2174,7 @@ function simulateSeason() {
     ...regularResults,
     ...finals
       .filter((row) => row.isUserGame)
-      .map((row) => ({
-        stage: row.stage,
-        weather: row.weather,
-        opponent: row.teamAId === "user" ? row.teamB : row.teamA,
-        userScore: row.userScore,
-        oppScore: row.oppScore,
-        result: row.result,
-        tryScorers: row.tryScorers || [],
-        fieldGoalScorers: row.fieldGoalScorers || [],
-        twoPointFieldGoalScorers: row.twoPointFieldGoalScorers || []
-      }))
+      .map(finalToUserResult)
   ];
   const leaders = calculateLeaders(playerStats);
   const summary = createSummary(userLadderRow, finals, regularResults, prediction);
@@ -2185,6 +2211,22 @@ async function startSimulationReveal(seasonResult) {
 
   for (const game of seasonResult.allResults) {
     if (token !== activeRevealToken) return;
+    if (game.pendingSpeech) {
+      state.pendingSpeech = game.speech;
+      render();
+      scrollToLiveGames();
+      const speechKey = await waitForGrandFinalSpeech(token);
+      if (token !== activeRevealToken || !speechKey) return;
+      const resolvedGame = resolvePendingGrandFinal(seasonResult, game, speechKey);
+      state.pendingSpeech = null;
+      state.simulationReveal.currentGame = resolvedGame;
+      render();
+      await delay(revealDelay(resolvedGame));
+      if (token !== activeRevealToken) return;
+      state.simulationReveal.completedGames.push(resolvedGame);
+      state.simulationReveal.currentGame = null;
+      continue;
+    }
     state.simulationReveal.currentGame = game;
     render();
     await delay(revealDelay(game));
@@ -2196,8 +2238,27 @@ async function startSimulationReveal(seasonResult) {
   if (token !== activeRevealToken) return;
   state.phase = "results";
   state.simulationReveal = null;
+  state.pendingSpeech = null;
   render();
   scrollToLiveGames();
+}
+
+function waitForGrandFinalSpeech(token) {
+  return new Promise((resolve) => {
+    pendingSpeechResolve = (choice) => {
+      if (token !== activeRevealToken) {
+        resolve(null);
+        return;
+      }
+      pendingSpeechResolve = null;
+      resolve(choice);
+    };
+  });
+}
+
+function chooseGrandFinalSpeech(choice) {
+  if (!state.pendingSpeech || !pendingSpeechResolve) return;
+  pendingSpeechResolve(choice);
 }
 
 function scrollToLiveGames() {
@@ -2209,6 +2270,25 @@ function scrollToLiveGames() {
     const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
     panel.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
   }, 50);
+}
+
+function scrollToSelectedXiii() {
+  scrollToMobileTarget(".squad-panel", "start");
+}
+
+function scrollToTopRatedPlayer() {
+  scrollToMobileTarget(".player-card:not(.unavailable)", "center");
+}
+
+function scrollToMobileTarget(selector, block = "start") {
+  if (!window.matchMedia?.("(max-width: 760px)").matches) return;
+
+  window.setTimeout(() => {
+    const target = document.querySelector(selector);
+    if (!target) return;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+    target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block });
+  }, 60);
 }
 
 function revealDelay(game) {
@@ -2301,7 +2381,7 @@ function setPairCount(pairCounts, a, b, count) {
   pairCounts.set(getPairKey(a, b), count);
 }
 
-function playMatch(teamA, teamB, isFinal, weather = WEATHER_TYPES[0]) {
+function playMatch(teamA, teamB, isFinal, weather = WEATHER_TYPES[0], options = {}) {
   const stageBoost = isFinal ? 0.16 : 0.1;
   const tempoA = teamA.tempo || 1;
   const tempoB = teamB.tempo || 1;
@@ -2327,16 +2407,22 @@ function playMatch(teamA, teamB, isFinal, weather = WEATHER_TYPES[0]) {
   const detailsA = makeRugbyScore(expectedA, teamA.goalSkill * weather.kicking, weather);
   const detailsB = makeRugbyScore(expectedB, teamB.goalSkill * weather.kicking, weather);
 
-  if (detailsA.score === detailsB.score) {
-    const chanceA = clamp(0.5 + (teamA.clutch - teamB.clutch) / 140, 0.28, 0.72);
-    if (Math.random() < chanceA) {
-      detailsA.fieldGoals += 1;
-      detailsA.score += 1;
-    } else {
-      detailsB.fieldGoals += 1;
-      detailsB.score += 1;
-    }
+  applySituationalFieldGoals(detailsA, detailsB, teamA, teamB, isFinal, weather);
+
+  if (options.scoreAdjustment) {
+    const targetDetails = options.adjustTeamId === teamA.id ? detailsA : detailsB;
+    applySpeechScoreAdjustment(targetDetails, options.scoreAdjustment);
   }
+
+  preventOnePointScore(detailsA);
+  preventOnePointScore(detailsB);
+
+  if (detailsA.score === detailsB.score) {
+    applyTiebreakingFieldGoal(detailsA, detailsB, teamA, teamB);
+  }
+
+  preventOnePointScore(detailsA);
+  preventOnePointScore(detailsB);
 
   return {
     scoreA: detailsA.score,
@@ -2380,11 +2466,75 @@ function makeRugbyScore(expected, goalSkill, weather = WEATHER_TYPES[0]) {
   const goalRate = clamp(0.56 + goalSkill / 260 + randomNormal() * 0.04, 0.42, 0.9);
   const goals = clamp(Math.round(tries * goalRate), 0, tries);
   const penaltyGoals = Math.random() < (weather.key === "wet" ? 0.34 : 0.26) ? randomInt(0, 2) : 0;
-  const fieldGoals = Math.random() < (weather.key === "windy" ? 0.06 : 0.09) ? 1 : 0;
-  const twoPointFieldGoals = Math.random() < (weather.key === "windy" ? 0.018 : 0.026) ? 1 : 0;
+  const fieldGoals = 0;
+  const twoPointFieldGoals = 0;
   const score = tries * 4 + goals * 2 + penaltyGoals * 2 + fieldGoals + twoPointFieldGoals * 2;
 
   return { tries, goals, penaltyGoals, fieldGoals, twoPointFieldGoals, score };
+}
+
+function applySituationalFieldGoals(detailsA, detailsB, teamA, teamB, isFinal, weather) {
+  maybeTwoPointFieldGoal(detailsA, detailsB, teamA, isFinal, weather);
+  maybeTwoPointFieldGoal(detailsB, detailsA, teamB, isFinal, weather);
+
+  if (detailsA.score === detailsB.score) {
+    applyTiebreakingFieldGoal(detailsA, detailsB, teamA, teamB);
+    return;
+  }
+
+  maybeSevenPointFieldGoal(detailsA, detailsB, teamA, isFinal, weather);
+  maybeSevenPointFieldGoal(detailsB, detailsA, teamB, isFinal, weather);
+}
+
+function maybeTwoPointFieldGoal(trailingDetails, leadingDetails, team, isFinal, weather) {
+  if (leadingDetails.score - trailingDetails.score !== 2) return;
+  const weatherFactor = weather.key === "windy" ? 0.42 : weather.key === "wet" ? 0.78 : 1;
+  const kicking = team.kicking || team.goalSkill || team.attack || 82;
+  const chance = clamp((isFinal ? 0.026 : 0.014) * weatherFactor + Math.max(0, kicking - 86) * 0.001, 0.004, 0.052);
+
+  if (Math.random() >= chance) return;
+  trailingDetails.twoPointFieldGoals += 1;
+  trailingDetails.score += 2;
+}
+
+function maybeSevenPointFieldGoal(leadingDetails, trailingDetails, team, isFinal, weather) {
+  if (leadingDetails.score - trailingDetails.score !== 6) return;
+  const weatherFactor = weather.key === "windy" ? 0.58 : weather.key === "wet" ? 0.92 : 1;
+  const chance = clamp((isFinal ? 0.09 : 0.052) * weatherFactor + Math.max(0, team.clutch - 86) * 0.002, 0.018, 0.14);
+
+  if (Math.random() >= chance) return;
+  leadingDetails.fieldGoals += 1;
+  leadingDetails.score += 1;
+}
+
+function applyTiebreakingFieldGoal(detailsA, detailsB, teamA, teamB) {
+  const kickingA = teamA.kicking || teamA.goalSkill || teamA.attack || 82;
+  const kickingB = teamB.kicking || teamB.goalSkill || teamB.attack || 82;
+  const chanceA = clamp(0.5 + (teamA.clutch - teamB.clutch) / 140 + (kickingA - kickingB) / 260, 0.28, 0.72);
+  const winnerDetails = Math.random() < chanceA ? detailsA : detailsB;
+
+  if (winnerDetails.score === 0) {
+    winnerDetails.penaltyGoals += 1;
+    winnerDetails.score += 2;
+    return;
+  }
+
+  winnerDetails.fieldGoals += 1;
+  winnerDetails.score += 1;
+}
+
+function applySpeechScoreAdjustment(details, adjustment) {
+  details.speechAdjustment = adjustment;
+  details.score = Math.max(0, details.score + adjustment);
+}
+
+function preventOnePointScore(details) {
+  if (details.score !== 1) return;
+  details.score = 2;
+  if (details.fieldGoals > 0) {
+    details.fieldGoals -= 1;
+    details.penaltyGoals += 1;
+  }
 }
 
 function createPlayerStats() {
@@ -2399,6 +2549,7 @@ function createPlayerStats() {
     games: 0,
     tries: 0,
     goals: 0,
+    goalAttempts: 0,
     fieldGoals: 0,
     twoPointFieldGoals: 0,
     points: 0,
@@ -2436,9 +2587,12 @@ function recordUserStats(playerStats, scoreDetails, didWin) {
   }
 
   const goalKicker = [...matchRows].sort((a, b) => b.row.ratings.goalKicking - a.row.ratings.goalKicking || b.row.ratings.kicking - a.row.ratings.kicking)[0];
-  goalKicker.goals += scoreDetails.goals + scoreDetails.penaltyGoals;
-  goalKicker.row.goals += scoreDetails.goals + scoreDetails.penaltyGoals;
-  goalKicker.row.points += (scoreDetails.goals + scoreDetails.penaltyGoals) * 2;
+  const goalsMade = scoreDetails.goals + scoreDetails.penaltyGoals;
+  const goalAttempts = scoreDetails.tries + scoreDetails.penaltyGoals;
+  goalKicker.goals += goalsMade;
+  goalKicker.row.goals += goalsMade;
+  goalKicker.row.goalAttempts += goalAttempts;
+  goalKicker.row.points += goalsMade * 2;
 
   const fieldKicker = [...matchRows].sort((a, b) => b.row.ratings.kicking - a.row.ratings.kicking)[0];
   fieldKicker.fieldGoals += scoreDetails.fieldGoals;
@@ -2561,6 +2715,17 @@ function simulateFinals(ladder, teamMap, playerStats) {
 function playFinalMatch(finals, stage, teamA, teamB, playerStats) {
   const weather = chooseWeather(true);
   const match = playMatch(teamA, teamB, true, weather);
+  const row = buildFinalRow(stage, teamA, teamB, match, weather, playerStats);
+
+  finals.push(row);
+  return {
+    ...row,
+    winnerTeam: match.winnerId === teamA.id ? teamA : teamB,
+    loserTeam: match.winnerId === teamA.id ? teamB : teamA
+  };
+}
+
+function buildFinalRow(stage, teamA, teamB, match, weather, playerStats) {
   const userInGame = teamA.id === "user" || teamB.id === "user";
   let scorers = { tryScorers: [], fieldGoalScorers: [], twoPointFieldGoalScorers: [] };
 
@@ -2569,7 +2734,7 @@ function playFinalMatch(finals, stage, teamA, teamB, playerStats) {
     scorers = recordUserStats(playerStats, userIsA ? match.detailsA : match.detailsB, match.winnerId === "user");
   }
 
-  const row = {
+  return {
     stage,
     teamA: teamA.name,
     teamB: teamB.name,
@@ -2578,6 +2743,7 @@ function playFinalMatch(finals, stage, teamA, teamB, playerStats) {
     scoreA: match.scoreA,
     scoreB: match.scoreB,
     weather,
+    opponent: userInGame ? (teamA.id === "user" ? teamB.name : teamA.name) : "",
     userScore: teamA.id === "user" ? match.scoreA : match.scoreB,
     oppScore: teamA.id === "user" ? match.scoreB : match.scoreA,
     result: userInGame ? (match.winnerId === "user" ? "W" : "L") : "",
@@ -2590,12 +2756,134 @@ function playFinalMatch(finals, stage, teamA, teamB, playerStats) {
     loser: match.winnerId === teamA.id ? teamB.name : teamA.name,
     isUserGame: userInGame
   };
+}
+
+function createPendingGrandFinal(finals, teamA, teamB) {
+  const userIsA = teamA.id === "user";
+  const opponent = userIsA ? teamB.name : teamA.name;
+  const row = {
+    stage: "Grand Final",
+    teamA: teamA.name,
+    teamB: teamB.name,
+    teamAId: teamA.id,
+    teamBId: teamB.id,
+    teamAData: teamA,
+    teamBData: teamB,
+    weather: chooseWeather(true),
+    opponent,
+    userScore: null,
+    oppScore: null,
+    scoreA: null,
+    scoreB: null,
+    result: "",
+    tryScorers: [],
+    fieldGoalScorers: [],
+    twoPointFieldGoalScorers: [],
+    winnerId: "",
+    winner: "",
+    loserId: "",
+    loser: "",
+    isUserGame: true,
+    pendingSpeech: true,
+    speech: createGrandFinalSpeech(opponent)
+  };
 
   finals.push(row);
+  return row;
+}
+
+function createGrandFinalSpeech(opponent) {
+  const keys = ["motivating", "strategic", "normal"];
+  const shuffledEffects = shuffle([6, 0, -6]);
+  const effects = Object.fromEntries(keys.map((key, index) => [key, shuffledEffects[index]]));
+  const intros = [
+    `The sheds go quiet before ${opponent}. One last message can shift the room.`,
+    `The team is waiting in a tight circle. Choose the note you want ringing in their ears.`,
+    `Grand Final nerves are real. This is your final chance to set the tone.`,
+    `The boots are taped, the tunnel is calling, and the captain looks your way.`
+  ];
+
+  return {
+    opponent,
+    intro: randomItem(intros),
+    effects,
+    options: [
+      {
+        key: "motivating",
+        label: "A. Motivating Speech",
+        text: randomItem([
+          "Tell them this is their moment and send them out breathing fire.",
+          "Lean into belief, energy and pride in the jumper.",
+          "Make it emotional: togetherness, courage and one more effort."
+        ])
+      },
+      {
+        key: "strategic",
+        label: "B. Strategic Speech",
+        text: randomItem([
+          "Keep it calm: kick pressure, win yardage, finish sets.",
+          "Focus on the plan, the matchups and staying patient.",
+          "Talk details: field position, defensive reads and composure."
+        ])
+      },
+      {
+        key: "normal",
+        label: "C. Same As Season",
+        text: randomItem([
+          "Trust the routine that got you here and keep the week normal.",
+          "No big theatre. Same process, same roles, same standards.",
+          "Keep the tone familiar and let the side play what it knows."
+        ])
+      }
+    ]
+  };
+}
+
+function resolvePendingGrandFinal(seasonResult, pendingRow, speechKey) {
+  const effect = pendingRow.speech?.effects?.[speechKey] || 0;
+  const match = playMatch(pendingRow.teamAData, pendingRow.teamBData, true, pendingRow.weather, {
+    adjustTeamId: "user",
+    scoreAdjustment: effect
+  });
+  const resolved = buildFinalRow("Grand Final", pendingRow.teamAData, pendingRow.teamBData, match, pendingRow.weather, seasonResult.playerStats);
+  const choice = pendingRow.speech?.options?.find((option) => option.key === speechKey);
+
+  Object.assign(pendingRow, resolved, {
+    pendingSpeech: false,
+    speechChoice: speechKey,
+    speechChoiceLabel: choice?.label || "Pre-game Speech",
+    speechEffect: effect,
+    speechOutcome: speechOutcomeLabel(effect)
+  });
+  delete pendingRow.teamAData;
+  delete pendingRow.teamBData;
+
+  seasonResult.leaders = calculateLeaders(seasonResult.playerStats);
+  seasonResult.summary = createSummary(
+    seasonResult.ladder.find((row) => row.id === "user"),
+    seasonResult.finals,
+    seasonResult.regularResults,
+    seasonResult.prediction
+  );
+
+  return finalToUserResult(pendingRow);
+}
+
+function speechOutcomeLabel(effect) {
+  if (effect > 0) return "Landed perfectly";
+  if (effect < 0) return "Missed the mark";
+  return "Kept things steady";
+}
+
+function finalToUserResult(row) {
+  if (row.pendingSpeech) return row;
+
   return {
     ...row,
-    winnerTeam: match.winnerId === teamA.id ? teamA : teamB,
-    loserTeam: match.winnerId === teamA.id ? teamB : teamA
+    opponent: row.opponent || (row.teamAId === "user" ? row.teamB : row.teamA),
+    tryScorers: row.tryScorers || [],
+    fieldGoalScorers: row.fieldGoalScorers || [],
+    twoPointFieldGoalScorers: row.twoPointFieldGoalScorers || []
   };
 }
 
@@ -2650,7 +2938,7 @@ function simulateUserFinalsPath(ladder, teamMap, playerStats, userPosition) {
   }
 
   const grandFinalOpponent = applyOpponentImmortal({ ...randomItem(GRAND_FINAL_WINNERS), tempo: 1 }, IMMORTAL_GRAND_FINAL_CHANCE);
-  playFinalMatch(finals, "Grand Final", userTeam, grandFinalOpponent, playerStats);
+  createPendingGrandFinal(finals, userTeam, grandFinalOpponent);
 
   return finals;
 }
@@ -2753,6 +3041,7 @@ async function copySummary() {
     `Finals: ${result.summary.finalStatus}`,
     `Weather: ${formatWeatherSummary(result.allResults)}`,
     grandFinal ? `Grand Final: ${grandFinal.userScore}-${grandFinal.oppScore} v ${grandFinal.teamAId === "user" ? grandFinal.teamB : grandFinal.teamA}` : null,
+    grandFinal?.speechOutcome ? `Speech: ${grandFinal.speechChoiceLabel} - ${grandFinal.speechOutcome} (${formatSigned(grandFinal.speechEffect)})` : null,
     `Top try-scorer: ${result.leaders.tries.name} (${result.leaders.tries.value})`,
     `Top point-scorer: ${result.leaders.points.name} (${result.leaders.points.value})`,
     `MVP: ${result.leaders.mvp.name} (${result.leaders.mvp.value} votes)`
@@ -3003,6 +3292,11 @@ function formatSigned(value) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat("en-AU").format(value);
+}
+
+function formatGoalPercentage(row) {
+  if (!row.goalAttempts) return "-";
+  return `${Math.round((row.goals / row.goalAttempts) * 100)}%`;
 }
 
 function ordinal(value) {

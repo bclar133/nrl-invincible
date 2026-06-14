@@ -1067,6 +1067,41 @@ h1 {
   line-height: 1.4;
 }
 
+.speech-card h2 {
+  font-size: clamp(36px, 7vw, 74px);
+}
+
+.speech-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.speech-button {
+  min-height: 76px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  text-align: left;
+}
+
+.speech-button span,
+.speech-button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.speech-button small {
+  color: rgba(13, 20, 15, 0.78);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1.2;
+  white-space: normal;
+}
+
 .sim-progress {
   overflow: hidden;
   height: 8px;
@@ -1266,6 +1301,10 @@ td {
     scroll-margin-top: 158px;
   }
 
+  .player-card {
+    scroll-margin-top: 158px;
+  }
+
   .shell {
     padding: 8px;
   }
@@ -1397,6 +1436,14 @@ td {
 
   .leaders {
     grid-template-columns: 1fr;
+  }
+
+  .speech-options {
+    grid-template-columns: 1fr;
+  }
+
+  .speech-button {
+    min-height: 64px;
   }
 
   .tabs {
