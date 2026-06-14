@@ -923,7 +923,7 @@ function render() {
     </section>
 
     <p class="notice">
-      Independent fan-made draft game prototype. Player-season positions are generated from Rugby League Project team pages; ratings are independent gameplay estimates and are not official data.
+      Independent fan-made draft game. Player-season positions are generated from Rugby League Project team pages; ratings are independent gameplay estimates and are not official data. Game by Brent Clark. <a href="mailto:brentaclark@proton.me">Enquiries</a>
     </p>
   `;
 
@@ -3152,7 +3152,7 @@ function createSnapshotCanvas() {
 
   ctx.fillStyle = "#aeb9ad";
   ctx.font = "700 22px Inter, Arial, sans-serif";
-  ctx.fillText("Independent fan-made prototype. No official logos or player images used.", 150, 1455);
+  ctx.fillText("Independent fan-made game. No official logos or player images used.", 150, 1455);
 
   return canvas;
 }
