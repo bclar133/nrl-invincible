@@ -950,24 +950,70 @@ function getSubtitle() {
 function renderToolbar() {
   if (state.phase === "simulating") {
     return `
-      <button class="button" disabled><span class="icon">></span>Simulating</button>
+      <button class="button" disabled>${iconSvg("simulate")}Simulating</button>
     `;
   }
 
   if (state.phase === "results") {
     return `
-      <button class="button small" data-action="copy-summary"><span class="icon">#</span>Copy Summary</button>
-      <button class="button small" data-action="copy-image"><span class="icon">[]</span>Copy Image</button>
-      <button class="button small" data-action="download-image"><span class="icon">v</span>Download PNG</button>
-      <button class="button small warning" data-action="reset"><span class="icon">x</span>New Run</button>
+      <button class="button small" data-action="copy-summary">${iconSvg("summary")}Copy Summary</button>
+      <button class="button small" data-action="copy-image">${iconSvg("image")}Copy Image</button>
+      <button class="button small" data-action="download-image">${iconSvg("download")}Download PNG</button>
+      <button class="button small warning" data-action="reset">${iconSvg("reset")}New Run</button>
     `;
   }
 
   return `
-    <button class="button spin-button" data-action="spin" ${isDraftComplete() || state.currentOffer ? "disabled" : ""}><span class="icon">o</span>Spin</button>
-    <button class="button" data-action="reroll" ${state.currentOffer && !state.rerollUsed && !isDraftComplete() ? "" : "disabled"}><span class="icon">~</span>Re-roll ${state.rerollUsed ? "Used" : "1"}</button>
-    <button class="button primary" data-action="simulate" ${isDraftComplete() ? "" : "disabled"}><span class="icon">></span>Simulate Season</button>
-    <button class="button warning" data-action="reset"><span class="icon">x</span>Reset</button>
+    <button class="button spin-button" data-action="spin" ${isDraftComplete() || state.currentOffer ? "disabled" : ""}>${iconSvg("spin")}Spin</button>
+    <button class="button" data-action="reroll" ${state.currentOffer && !state.rerollUsed && !isDraftComplete() ? "" : "disabled"}>${iconSvg("reroll")}Re-roll ${state.rerollUsed ? "Used" : "1"}</button>
+    <button class="button primary" data-action="simulate" ${isDraftComplete() ? "" : "disabled"}>${iconSvg("simulate")}Simulate Season</button>
+    <button class="button warning" data-action="reset">${iconSvg("reset")}Reset</button>
+  `;
+}
+
+function iconSvg(name) {
+  const paths = {
+    spin: `
+      <circle cx="12" cy="12" r="7"></circle>
+      <path d="M12 5v3.5M12 15.5V19M5 12h3.5M15.5 12H19"></path>
+      <path d="m16.8 7.2 1.8-.4-.4 1.8"></path>
+    `,
+    reroll: `
+      <path d="M5 9a6 6 0 0 1 10.2-4.2L17 6.6"></path>
+      <path d="M17 4v4h-4"></path>
+      <path d="M19 15a6 6 0 0 1-10.2 4.2L7 17.4"></path>
+      <path d="M7 20v-4h4"></path>
+    `,
+    simulate: `
+      <path d="M7 5v14l11-7z"></path>
+      <path d="M4 5v14"></path>
+    `,
+    reset: `
+      <path d="M7 7l10 10"></path>
+      <path d="M17 7 7 17"></path>
+      <path d="M12 3.8a8.2 8.2 0 1 0 8.2 8.2"></path>
+    `,
+    summary: `
+      <path d="M6 4h9l3 3v13H6z"></path>
+      <path d="M15 4v4h4"></path>
+      <path d="M9 11h6M9 15h6"></path>
+    `,
+    image: `
+      <rect x="4" y="5" width="16" height="14" rx="2"></rect>
+      <circle cx="9" cy="10" r="1.5"></circle>
+      <path d="m6.5 17 4.2-4.2 2.5 2.5 2.1-2.1L19 17"></path>
+    `,
+    download: `
+      <path d="M12 4v10"></path>
+      <path d="m8 10 4 4 4-4"></path>
+      <path d="M5 19h14"></path>
+    `
+  };
+
+  return `
+    <svg class="button-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      ${paths[name] || paths.summary}
+    </svg>
   `;
 }
 
@@ -1245,24 +1291,24 @@ function renderSimulationPanel() {
         <div class="sim-progress"><span style="width:${progress}%"></span></div>
       </div>
       <div class="table-wrap sim-list">
-        <table class="compact-table">
+        <table class="compact-table sim-table">
           <thead>
             <tr>
               <th>Game</th>
               <th>Stage</th>
               <th>Opponent</th>
               <th>Score</th>
-              <th>Result</th>
+              <th>W/L</th>
             </tr>
           </thead>
           <tbody>
             ${completed.slice(-12).map((row, index) => `
               <tr>
-                <td>${Math.max(1, completed.length - 11) + index}</td>
-                <td>${escapeHTML(row.stage)}</td>
-                <td>${renderTeamName(row.opponent, { compact: true })}</td>
-                <td>${row.userScore}-${row.oppScore}</td>
-                <td class="${resultClass(row)}">${row.result}</td>
+                <td class="sim-game-cell">${Math.max(1, completed.length - 11) + index}</td>
+                <td class="sim-stage-cell" title="${escapeHTML(row.stage)}">${escapeHTML(formatShortStage(row.stage))}</td>
+                <td class="sim-opponent-cell">${renderTeamName(row.opponent, { compact: true })}</td>
+                <td class="sim-score-cell">${row.userScore}-${row.oppScore}</td>
+                <td class="sim-result-cell ${resultClass(row)}">${row.result}</td>
               </tr>
             `).join("")}
           </tbody>
@@ -1313,13 +1359,13 @@ function renderResultsPanel() {
     <section class="panel results-panel">
       <div class="panel-header">
         <h2 class="panel-title">Season Review</h2>
-        <span class="mini">${state.ratingMode === "season" ? "Season form" : "Career peak"} | ${escapeHTML(result.teamRatings.styleLabel)}</span>
+        <span class="mini">${state.ratingMode === "season" ? "Season form" : "Career peak"} | ${escapeHTML(result.teamRatings.styleLabel)} | ${formatTotalGames(result.summary)}</span>
       </div>
       <div class="result-hero">
         <div class="result-card">
           <span class="status-pill">${escapeHTML(result.summary.finalStatus)}</span>
           <h2>${escapeHTML(result.summary.record)}</h2>
-          <p class="wheel-meta">${escapeHTML(result.summary.regularFinish)} | Points differential ${formatSigned(result.summary.pointsDiff)}</p>
+          <p class="wheel-meta">${escapeHTML(result.summary.regularFinish)} | ${formatTotalGames(result.summary)} | Points differential ${formatSigned(result.summary.pointsDiff)}</p>
           <div class="leaders">
             ${renderLeader("Tries", leaders.tries.name, leaders.tries.value)}
             ${renderLeader("Points", leaders.points.name, leaders.points.value)}
@@ -1378,6 +1424,19 @@ function resultClass(row) {
   return row.result === "W" ? "win" : "loss";
 }
 
+function formatShortStage(stage = "") {
+  if (stage.startsWith("Round ")) return `R${stage.replace("Round ", "")}`;
+  const stages = {
+    "Qualifying Final": "QF",
+    "Elimination Final": "EF",
+    "Semi Final": "SF",
+    "Preliminary Final": "PF",
+    "Grand Final": "GF"
+  };
+
+  return stages[stage] || stage;
+}
+
 function formatTryScorers(scorers = []) {
   return scorers.length ? scorers.join(", ") : "No tries";
 }
@@ -1426,9 +1485,11 @@ function renderActiveResultsTab() {
 
 function renderPlayerStatsTable() {
   const rows = [...state.seasonResult.playerStats].sort((a, b) => b.mvpVotes - a.mvpVotes || b.points - a.points || b.tries - a.tries);
+  const summary = state.seasonResult.summary;
 
   return `
     <div class="table-wrap">
+      <p class="table-note">Final stats include finals: ${summary.totalGames} games (${summary.regularGames} regular + ${summary.finalsGames} finals).</p>
       <table>
         <thead>
           <tr>
@@ -2977,6 +3038,8 @@ function leaderBy(playerStats, key) {
 function createSummary(userLadderRow, finals, regularResults, prediction) {
   const wins = regularResults.filter((row) => row.result === "W").length;
   const losses = regularResults.length - wins;
+  const finalsGames = countUserFinalsGames(finals);
+  const regularGames = regularResults.length;
   const grandFinal = finals.find((game) => game.stage === "Grand Final" && (game.teamAId === "user" || game.teamBId === "user"));
   let finalStatus = "Missed finals";
 
@@ -3002,10 +3065,22 @@ function createSummary(userLadderRow, finals, regularResults, prediction) {
     regularFinish: `${ordinal(userLadderRow.position)} on the ladder`,
     regularPosition: userLadderRow.position,
     regularPoints: userLadderRow.points,
+    regularGames,
+    finalsGames,
+    totalGames: regularGames + finalsGames,
     finalStatus,
     pointsDiff: userLadderRow.diff,
     prediction
   };
+}
+
+function countUserFinalsGames(finals = []) {
+  return finals.filter((game) => game.isUserGame && !game.pendingSpeech && game.result).length;
+}
+
+function formatTotalGames(summary) {
+  if (!summary?.finalsGames) return `${summary?.regularGames || 24} games`;
+  return `${summary.totalGames} games incl. finals`;
 }
 
 function formatPredictionDelta(summary, prediction) {
@@ -3037,6 +3112,7 @@ async function copySummary() {
     `Style: ${result.teamRatings.styleLabel}`,
     result.prediction ? `Prediction: ${result.prediction.finishLabel}, ${result.prediction.points} pts, ${result.prediction.finalsForecast}` : null,
     `Record: ${result.summary.record}`,
+    `Games: ${result.summary.totalGames} (${result.summary.regularGames} regular + ${result.summary.finalsGames} finals)`,
     `Regular finish: ${result.summary.regularFinish}`,
     `Finals: ${result.summary.finalStatus}`,
     `Weather: ${formatWeatherSummary(result.allResults)}`,
@@ -3085,18 +3161,18 @@ function createSnapshotCanvas() {
   const result = state.seasonResult;
   const canvas = document.createElement("canvas");
   canvas.width = 1200;
-  canvas.height = 1600;
+  canvas.height = 1700;
   const ctx = canvas.getContext("2d");
 
   ctx.fillStyle = "#101311";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   ctx.fillStyle = "#1f6b43";
-  ctx.fillRect(70, 70, 1060, 1460);
+  ctx.fillRect(70, 70, 1060, 1560);
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.lineWidth = 3;
   for (let i = 0; i <= 10; i += 1) {
-    const y = 70 + i * 146;
+    const y = 70 + i * 156;
     ctx.beginPath();
     ctx.moveTo(70, y);
     ctx.lineTo(1130, y);
@@ -3104,7 +3180,7 @@ function createSnapshotCanvas() {
   }
 
   ctx.fillStyle = "rgba(16,19,17,0.86)";
-  roundRect(ctx, 110, 110, 980, 1380, 18);
+  roundRect(ctx, 110, 110, 980, 1480, 18);
   ctx.fill();
 
   ctx.fillStyle = "#b7ef5d";
@@ -3117,7 +3193,7 @@ function createSnapshotCanvas() {
 
   ctx.fillStyle = "#d8dece";
   ctx.font = "700 38px Inter, Arial, sans-serif";
-  ctx.fillText(`${result.summary.regularFinish} | ${result.summary.finalStatus}`, 150, 405);
+  ctx.fillText(`${result.summary.regularFinish} | ${result.summary.finalStatus} | ${formatTotalGames(result.summary)}`, 150, 405);
   ctx.fillText(`${result.teamRatings.styleLabel} style | Points differential ${formatSigned(result.summary.pointsDiff)} | Team rating ${result.teamRatings.overall}`, 150, 455);
 
   const leaderRows = [
@@ -3141,32 +3217,45 @@ function createSnapshotCanvas() {
 
   ctx.fillStyle = "#ffd166";
   ctx.font = "900 34px Inter, Arial, sans-serif";
-  ctx.fillText("Selected XIII", 150, 1160);
+  ctx.fillText("Selected XIII", 150, 1138);
 
   ctx.fillStyle = "#f3f5ef";
   ctx.font = "700 27px Inter, Arial, sans-serif";
   const left = state.drafted.slice(0, 7);
   const right = state.drafted.slice(7);
-  drawSnapshotList(ctx, left, 150, 1225);
-  drawSnapshotList(ctx, right, 610, 1225);
+  drawSnapshotList(ctx, left, 150, 1205);
+  drawSnapshotList(ctx, right, 610, 1205);
 
   ctx.fillStyle = "#aeb9ad";
   ctx.font = "700 22px Inter, Arial, sans-serif";
-  ctx.fillText("Independent fan-made game. No official logos or player images used.", 150, 1455);
+  ctx.fillText("Independent fan-made game. No official logos or player images used.", 150, 1548);
 
   return canvas;
 }
 
 function drawSnapshotList(ctx, picks, x, y) {
+  const rowHeight = 40;
+
   picks.forEach((pick, index) => {
     const slot = pick.slotLabel;
     ctx.fillStyle = "#b7ef5d";
-    ctx.font = "900 22px Inter, Arial, sans-serif";
-    ctx.fillText(slot.toUpperCase(), x, y + index * 44);
+    drawFittedText(ctx, slot.toUpperCase(), x, y + index * rowHeight, 132, 21, 15, "900", "Inter, Arial, sans-serif");
     ctx.fillStyle = "#f3f5ef";
-    ctx.font = "800 24px Inter, Arial, sans-serif";
-    drawText(ctx, `${pick.name} ${pick.effectiveRatings.overall}`, x + 135, y + index * 44, 310, 28);
+    drawFittedText(ctx, `${pick.name} ${pick.effectiveRatings.overall}`, x + 150, y + index * rowHeight, 330, 24, 16, "800", "Inter, Arial, sans-serif");
   });
+}
+
+function drawFittedText(ctx, text, x, y, maxWidth, size, minSize, weight, family) {
+  let fontSize = size;
+  const value = String(text);
+
+  do {
+    ctx.font = `${weight} ${fontSize}px ${family}`;
+    if (ctx.measureText(value).width <= maxWidth || fontSize <= minSize) break;
+    fontSize -= 1;
+  } while (fontSize >= minSize);
+
+  ctx.fillText(value, x, y);
 }
 
 function roundRect(ctx, x, y, width, height, radius) {
