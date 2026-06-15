@@ -36,6 +36,8 @@ const POSITION_LABELS = {
   hooker: "Hooker"
 };
 
+const SPINE_POSITIONS = ["fullback", "half", "hooker"];
+
 const PLAY_STYLES = {
   balanced: {
     label: "Balanced",
@@ -980,7 +982,7 @@ function getSubtitle() {
 
   if (state.phase === "results") {
     const summary = state.seasonResult.summary;
-    return `${summary.record} regular season, ${summary.regularFinish}, ${summary.finalStatus}`;
+    return `${summary.record} overall, ${summary.regularRecord} regular season, ${summary.regularFinish}, ${summary.finalStatus}`;
   }
 
   if (isDraftComplete()) {
@@ -1953,7 +1955,7 @@ function applyCareerRatingCalibration(candidate, ratings) {
 
   const profile = careerProfiles.get(candidate.careerId);
   const positions = profile?.positions || candidate.positions || [];
-  const isPlaymaker = positions.some((position) => ["fullback", "half", "hooker"].includes(position));
+  const isPlaymaker = positions.some((position) => SPINE_POSITIONS.includes(position));
   const adjust = (key, weight) => clamp(Math.round(ratings[key] + delta * weight), 45, 99);
 
   return {
@@ -2002,6 +2004,10 @@ function calculateTeamRatings() {
       clutch: 0,
       goalSkill: 0,
       spine: 0,
+      spineAttack: 0,
+      spineKicking: 0,
+      spineClutch: 0,
+      spineImpact: 0,
       backs: 0,
       pack: 0,
       weakLink: 0,
@@ -2022,7 +2028,7 @@ function calculateTeamRatings() {
     const source = items.length ? items : picks;
     return Math.round(source.reduce((sum, item) => sum + getSimulationRatings(item).overall, 0) / source.length);
   };
-  const spine = picks.filter((item) => ["fullback", "half", "hooker"].includes(item.slotKey));
+  const spine = picks.filter((item) => SPINE_POSITIONS.includes(item.slotKey));
   const backs = picks.filter((item) => ["fullback", "wing", "centre", "half"].includes(item.slotKey));
   const forwards = picks.filter((item) => ["edge", "middle", "lock", "hooker"].includes(item.slotKey));
   const middles = picks.filter((item) => ["middle", "lock"].includes(item.slotKey));
@@ -2033,10 +2039,15 @@ function calculateTeamRatings() {
   const eliteCount = sortedOverall.filter((value) => value >= 90).length;
   const volatility = Math.round(picks.reduce((sum, item) => sum + Math.abs(item.formDelta || 0), 0) / picks.length);
 
-  const attack = Math.round(avg("attack") * 0.56 + avg("attack", spine) * 0.24 + avg("kicking", spine) * 0.1 + avg("attack", backs) * 0.1);
+  const spineOverall = avgOverall(spine);
+  const spineAttack = avg("attack", spine);
+  const spineKicking = avg("kicking", spine);
+  const spineClutch = Math.round(avg("bigGame", spine) * 0.56 + spineOverall * 0.24 + spineKicking * 0.2);
+  const spineImpact = Math.round(spineOverall * 0.34 + spineAttack * 0.2 + spineKicking * 0.18 + spineClutch * 0.28);
+  const attack = Math.round(avg("attack") * 0.56 + spineAttack * 0.24 + spineKicking * 0.1 + avg("attack", backs) * 0.1);
   const defence = Math.round(avg("defence") * 0.72 + avg("defence", forwards) * 0.22 + avg("workrate", forwards) * 0.06);
   const power = Math.round(avg("workrate") * 0.46 + avg("attack", middles.length ? middles : forwards) * 0.26 + avg("defence", forwards) * 0.28);
-  const clutch = Math.round(avg("bigGame"));
+  const clutch = Math.round(avg("bigGame") * 0.62 + avg("bigGame", spine) * 0.2 + spineOverall * 0.08 + spineKicking * 0.1);
   const goalSkill = Math.max(...picks.map((item) => getSimulationRatings(item).goalKicking));
   const weakLink = Math.round(bottomThree.reduce((sum, value) => sum + value, 0) / bottomThree.length);
   const weakLinkPenalty = Math.max(0, 83 - weakLink) * 0.18;
@@ -2051,7 +2062,11 @@ function calculateTeamRatings() {
     power,
     clutch,
     goalSkill,
-    spine: avgOverall(spine),
+    spine: spineOverall,
+    spineAttack,
+    spineKicking,
+    spineClutch,
+    spineImpact,
     backs: avgOverall(backs),
     pack: avgOverall(forwards),
     weakLink,
@@ -2277,6 +2292,10 @@ function simulateSeason() {
     power: teamRatings.power,
     clutch: teamRatings.clutch,
     goalSkill: teamRatings.goalSkill,
+    kicking: teamRatings.spineKicking,
+    spineImpact: teamRatings.spineImpact,
+    spineKicking: teamRatings.spineKicking,
+    spineClutch: teamRatings.spineClutch,
     tempo: teamRatings.tempo
   };
 
@@ -2535,6 +2554,7 @@ function setPairCount(pairCounts, a, b, count) {
 }
 
 function playMatch(teamA, teamB, isFinal, weather = WEATHER_TYPES[0], options = {}) {
+  const stage = options.stage || "";
   const stageBoost = isFinal ? 0.16 : 0.1;
   const tempoA = teamA.tempo || 1;
   const tempoB = teamB.tempo || 1;
@@ -2546,13 +2566,15 @@ function playMatch(teamA, teamB, isFinal, weather = WEATHER_TYPES[0], options = 
   const powerDiffB = softRatingDiff(teamB.power - teamA.power);
   const clutchDiffA = softRatingDiff(teamA.clutch - teamB.clutch);
   const clutchDiffB = softRatingDiff(teamB.clutch - teamA.clutch);
+  const spineBoostA = calculateSpineExpectedBoost(teamA, teamB, isFinal, weather, stage);
+  const spineBoostB = calculateSpineExpectedBoost(teamB, teamA, isFinal, weather, stage);
   const expectedA = clamp(
-    (20.5 + attackDiffA * 0.31 + powerDiffA * 0.12 + clutchDiffA * stageBoost) * matchTempo + randomNormal() * variance,
+    (20.5 + attackDiffA * 0.31 + powerDiffA * 0.12 + clutchDiffA * stageBoost + spineBoostA) * matchTempo + randomNormal() * variance,
     4,
     48
   );
   const expectedB = clamp(
-    (20.5 + attackDiffB * 0.31 + powerDiffB * 0.12 + clutchDiffB * stageBoost) * matchTempo + randomNormal() * variance,
+    (20.5 + attackDiffB * 0.31 + powerDiffB * 0.12 + clutchDiffB * stageBoost + spineBoostB) * matchTempo + randomNormal() * variance,
     4,
     48
   );
@@ -2560,6 +2582,7 @@ function playMatch(teamA, teamB, isFinal, weather = WEATHER_TYPES[0], options = 
   const detailsA = makeRugbyScore(expectedA, teamA.goalSkill * weather.kicking, weather);
   const detailsB = makeRugbyScore(expectedB, teamB.goalSkill * weather.kicking, weather);
 
+  applySpineCloseGameInfluence(detailsA, detailsB, teamA, teamB, isFinal, weather, stage);
   applySituationalFieldGoals(detailsA, detailsB, teamA, teamB, isFinal, weather);
 
   if (options.scoreAdjustment) {
@@ -2589,6 +2612,88 @@ function playMatch(teamA, teamB, isFinal, weather = WEATHER_TYPES[0], options = 
 
 function softRatingDiff(diff) {
   return Math.tanh(diff / 16) * 16;
+}
+
+function getTeamSpineImpact(team) {
+  if (typeof team.spineImpact === "number") return clamp(Math.round(team.spineImpact), 1, 100);
+
+  const kicking = team.spineKicking || team.kicking || team.goalSkill || team.attack || 82;
+  return clamp(Math.round((team.attack || 82) * 0.38 + (team.clutch || 82) * 0.38 + kicking * 0.24), 1, 100);
+}
+
+function getTeamSpineKicking(team) {
+  return team.spineKicking || team.kicking || team.goalSkill || team.attack || 82;
+}
+
+function spineStageWeight(isFinal, stage = "") {
+  if (!isFinal) return 0.62;
+  if (stage === "Grand Final") return 1.48;
+  if (stage === "Preliminary Final") return 1.28;
+  return 1.12;
+}
+
+function calculateSpineExpectedBoost(team, opponent, isFinal, weather, stage = "") {
+  const spine = getTeamSpineImpact(team);
+  const opponentSpine = getTeamSpineImpact(opponent);
+  const stageWeight = spineStageWeight(isFinal, stage);
+  const weatherFactor = weather.key === "wet" ? 0.82 : weather.key === "windy" ? 0.9 : 1;
+  const spineEdge = softRatingDiff(spine - opponentSpine);
+  const eliteSpine = Math.max(0, spine - 88);
+  const pressureRating = Math.max(0, (team.clutch || spine) - 86);
+  const boost = (spineEdge * 0.045 + eliteSpine * 0.04 + pressureRating * 0.018) * stageWeight * weatherFactor;
+
+  return clamp(boost, isFinal ? -2.1 : -1.1, isFinal ? 3.4 : 1.6);
+}
+
+function applySpineCloseGameInfluence(detailsA, detailsB, teamA, teamB, isFinal, weather, stage = "") {
+  const margin = Math.abs(detailsA.score - detailsB.score);
+  const maxMargin = isFinal ? 10 : 6;
+  if (margin > maxMargin) return;
+
+  const chanceA = spineMomentChance(teamA, teamB, margin, isFinal, weather, stage);
+  const chanceB = spineMomentChance(teamB, teamA, margin, isFinal, weather, stage);
+  const totalChance = clamp(chanceA + chanceB, 0, isFinal ? 0.42 : 0.2);
+  if (Math.random() >= totalChance) return;
+
+  if (Math.random() < chanceA / Math.max(0.001, chanceA + chanceB)) {
+    applySpineMoment(detailsA, detailsB, teamA, isFinal, weather);
+  } else {
+    applySpineMoment(detailsB, detailsA, teamB, isFinal, weather);
+  }
+}
+
+function spineMomentChance(team, opponent, margin, isFinal, weather, stage = "") {
+  const spine = getTeamSpineImpact(team);
+  const opponentSpine = getTeamSpineImpact(opponent);
+  const stageWeight = spineStageWeight(isFinal, stage);
+  const weatherFactor = weather.key === "wet" ? 0.82 : weather.key === "windy" ? 0.88 : 1;
+  const closeBonus = margin <= 2 ? 0.06 : margin <= 6 ? 0.034 : 0.018;
+  const base = isFinal ? 0.036 : 0.014;
+  const eliteBonus = Math.max(0, spine - 84) * 0.0048;
+  const edgeBonus = Math.max(0, spine - opponentSpine) * 0.0042;
+  const clutchBonus = Math.max(0, (team.clutch || spine) - 86) * 0.0022;
+
+  return clamp((base + closeBonus + eliteBonus + edgeBonus + clutchBonus) * stageWeight * weatherFactor, 0.002, isFinal ? 0.32 : 0.14);
+}
+
+function applySpineMoment(details, opponentDetails, team, isFinal, weather) {
+  const margin = details.score - opponentDetails.score;
+  const kicking = getTeamSpineKicking(team);
+  const tryChance = margin < 0 ? 0.7 : isFinal ? 0.58 : 0.46;
+
+  if (Math.random() < tryChance) {
+    details.tries += 1;
+    details.score += 4;
+    const goalRate = clamp(0.54 + kicking / 285 + (weather.key === "windy" ? -0.08 : weather.key === "wet" ? -0.04 : 0), 0.42, 0.9);
+    if (Math.random() < goalRate) {
+      details.goals += 1;
+      details.score += 2;
+    }
+    return;
+  }
+
+  details.penaltyGoals += 1;
+  details.score += 2;
 }
 
 function chooseWeather(isFinal) {
@@ -2642,8 +2747,8 @@ function applySituationalFieldGoals(detailsA, detailsB, teamA, teamB, isFinal, w
 function maybeTwoPointFieldGoal(trailingDetails, leadingDetails, team, isFinal, weather) {
   if (leadingDetails.score - trailingDetails.score !== 2) return;
   const weatherFactor = weather.key === "windy" ? 0.42 : weather.key === "wet" ? 0.78 : 1;
-  const kicking = team.kicking || team.goalSkill || team.attack || 82;
-  const chance = clamp((isFinal ? 0.026 : 0.014) * weatherFactor + Math.max(0, kicking - 86) * 0.001, 0.004, 0.052);
+  const kicking = getTeamSpineKicking(team);
+  const chance = clamp((isFinal ? 0.026 : 0.014) * weatherFactor + Math.max(0, kicking - 86) * 0.0012 + Math.max(0, getTeamSpineImpact(team) - 88) * 0.0008, 0.004, 0.058);
 
   if (Math.random() >= chance) return;
   trailingDetails.twoPointFieldGoals += 1;
@@ -2653,7 +2758,7 @@ function maybeTwoPointFieldGoal(trailingDetails, leadingDetails, team, isFinal, 
 function maybeSevenPointFieldGoal(leadingDetails, trailingDetails, team, isFinal, weather) {
   if (leadingDetails.score - trailingDetails.score !== 6) return;
   const weatherFactor = weather.key === "windy" ? 0.58 : weather.key === "wet" ? 0.92 : 1;
-  const chance = clamp((isFinal ? 0.09 : 0.052) * weatherFactor + Math.max(0, team.clutch - 86) * 0.002, 0.018, 0.14);
+  const chance = clamp((isFinal ? 0.09 : 0.052) * weatherFactor + Math.max(0, team.clutch - 86) * 0.0017 + Math.max(0, getTeamSpineImpact(team) - 86) * 0.0014, 0.018, 0.15);
 
   if (Math.random() >= chance) return;
   leadingDetails.fieldGoals += 1;
@@ -2661,9 +2766,11 @@ function maybeSevenPointFieldGoal(leadingDetails, trailingDetails, team, isFinal
 }
 
 function applyTiebreakingFieldGoal(detailsA, detailsB, teamA, teamB) {
-  const kickingA = teamA.kicking || teamA.goalSkill || teamA.attack || 82;
-  const kickingB = teamB.kicking || teamB.goalSkill || teamB.attack || 82;
-  const chanceA = clamp(0.5 + (teamA.clutch - teamB.clutch) / 140 + (kickingA - kickingB) / 260, 0.28, 0.72);
+  const kickingA = getTeamSpineKicking(teamA);
+  const kickingB = getTeamSpineKicking(teamB);
+  const spineA = getTeamSpineImpact(teamA);
+  const spineB = getTeamSpineImpact(teamB);
+  const chanceA = clamp(0.5 + (teamA.clutch - teamB.clutch) / 150 + (kickingA - kickingB) / 260 + (spineA - spineB) / 210, 0.24, 0.76);
   const winnerDetails = Math.random() < chanceA ? detailsA : detailsB;
 
   if (winnerDetails.score === 0) {
@@ -2867,7 +2974,7 @@ function simulateFinals(ladder, teamMap, playerStats) {
 
 function playFinalMatch(finals, stage, teamA, teamB, playerStats) {
   const weather = chooseWeather(true);
-  const match = playMatch(teamA, teamB, true, weather);
+  const match = playMatch(teamA, teamB, true, weather, { stage });
   const row = buildFinalRow(stage, teamA, teamB, match, weather, playerStats);
 
   finals.push(row);
@@ -2995,6 +3102,7 @@ function createGrandFinalSpeech(opponent) {
 function resolvePendingGrandFinal(seasonResult, pendingRow, speechKey) {
   const effect = pendingRow.speech?.effects?.[speechKey] || 0;
   const match = playMatch(pendingRow.teamAData, pendingRow.teamBData, true, pendingRow.weather, {
+    stage: "Grand Final",
     adjustTeamId: "user",
     scoreAdjustment: effect
   });
@@ -3128,8 +3236,13 @@ function leaderBy(playerStats, key) {
 }
 
 function createSummary(userLadderRow, finals, regularResults, prediction) {
-  const wins = regularResults.filter((row) => row.result === "W").length;
-  const losses = regularResults.length - wins;
+  const regularWins = regularResults.filter((row) => row.result === "W").length;
+  const regularLosses = regularResults.length - regularWins;
+  const userFinals = finals.filter((game) => game.isUserGame && !game.pendingSpeech && game.result);
+  const finalsWins = userFinals.filter((game) => game.winnerId === "user" || game.result === "W").length;
+  const finalsLosses = userFinals.length - finalsWins;
+  const wins = regularWins + finalsWins;
+  const losses = regularLosses + finalsLosses;
   const finalsGames = countUserFinalsGames(finals);
   const regularGames = regularResults.length;
   const grandFinal = finals.find((game) => game.stage === "Grand Final" && (game.teamAId === "user" || game.teamBId === "user"));
@@ -3154,6 +3267,12 @@ function createSummary(userLadderRow, finals, regularResults, prediction) {
     wins,
     losses,
     record: `${wins}-${losses}`,
+    regularRecord: `${regularWins}-${regularLosses}`,
+    finalsRecord: `${finalsWins}-${finalsLosses}`,
+    regularWins,
+    regularLosses,
+    finalsWins,
+    finalsLosses,
     regularFinish: `${ordinal(userLadderRow.position)} on the ladder`,
     regularPosition: userLadderRow.position,
     regularPoints: userLadderRow.points,
