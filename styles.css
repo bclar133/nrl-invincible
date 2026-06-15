@@ -448,6 +448,13 @@ h1 {
   font-weight: 900;
 }
 
+.slot.goal-kicker-slot {
+  border-color: rgba(255, 209, 102, 0.58);
+  background:
+    linear-gradient(135deg, rgba(255, 209, 102, 0.12), transparent 64%),
+    rgba(13, 19, 15, 0.9);
+}
+
 .slot-meta {
   overflow: hidden;
   margin-top: 4px;
@@ -603,6 +610,93 @@ h1 {
   text-transform: uppercase;
 }
 
+.goal-kicker-picker {
+  display: grid;
+  grid-template-columns: 0.72fr 1.28fr;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.goal-kicker-picker h3 {
+  font-size: 14px;
+}
+
+.goal-kicker-picker p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.goal-kicker-options {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.goal-kicker-button {
+  display: grid;
+  min-width: 0;
+  min-height: 62px;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: #111713;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.goal-kicker-button b,
+.goal-kicker-button small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.goal-kicker-button b {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.goal-kicker-button small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.goal-kicker-button.active {
+  border-color: rgba(255, 209, 102, 0.62);
+  background:
+    linear-gradient(135deg, rgba(255, 209, 102, 0.14), transparent 66%),
+    #141911;
+}
+
+.kicker-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.kicker-stat {
+  display: inline-flex;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--rating-border, rgba(255, 255, 255, 0.1));
+  border-radius: 999px;
+  background: var(--rating-bg, rgba(255, 255, 255, 0.05));
+  color: var(--rating-color, var(--soft));
+  font-size: 8px;
+  font-weight: 950;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
 .prediction-panel {
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
@@ -752,7 +846,8 @@ h1 {
 }
 
 .team-immortal-mini,
-.inline-immortal {
+.inline-immortal,
+.inline-goal-kicker {
   display: inline-flex;
   align-items: center;
   margin-left: 4px;
@@ -765,6 +860,10 @@ h1 {
 .team-immortal-mini {
   color: #ffd166;
   text-transform: none;
+}
+
+.inline-goal-kicker {
+  color: var(--gold);
 }
 
 .candidate-grid {
@@ -1412,10 +1511,15 @@ td {
 
   .style-picker,
   .style-options,
+  .goal-kicker-picker,
   .intro-grid,
   .prediction-panel,
   .prediction-grid {
     grid-template-columns: 1fr;
+  }
+
+  .goal-kicker-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .meter-row {

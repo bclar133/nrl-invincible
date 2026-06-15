@@ -891,6 +891,7 @@ const state = {
   ratingMode: "career",
   playStyle: "balanced",
   drafted: [],
+  goalKickerId: null,
   lockedCareers: new Set(),
   rerollUsed: false,
   currentOffer: null,
@@ -1113,13 +1114,13 @@ function renderSlot(index) {
   }
 
   return `
-      <div class="slot filled">
+      <div class="slot filled ${isSelectedGoalKicker(pick) ? "goal-kicker-slot" : ""}">
       <div class="slot-role">
         <span>${escapeHTML(slot.label)}</span>
         <span class="slot-rating ${ratingClass(pick.effectiveRatings.overall)}">${pick.effectiveRatings.overall}</span>
       </div>
       <div class="slot-name">${escapeHTML(pick.name)}${pick.isImmortal ? ` <span class="inline-immortal">Immortal</span>` : ""}</div>
-      <div class="slot-meta">${pick.season} ${renderTeamName(pick.club, { compact: true })} | ${escapeHTML(pick.fit.label)} | Form ${formatSigned(pick.formDelta)}</div>
+      <div class="slot-meta">${pick.season} ${renderTeamName(pick.club, { compact: true })} | ${escapeHTML(pick.fit.label)} | Form ${formatSigned(pick.formDelta)}${isSelectedGoalKicker(pick) ? " | Goal kicker" : ""}</div>
     </div>
   `;
 }
@@ -1140,6 +1141,7 @@ function renderDraftPanel() {
       </div>
       ${!state.drafted.length && !state.currentOffer ? renderIntroPanel() : ""}
       ${isDraftComplete() ? renderStylePicker() : ""}
+      ${isDraftComplete() ? renderGoalKickerPicker() : ""}
       ${isDraftComplete() ? renderPredictionPanel() : ""}
       <div class="spin-stage">
         ${renderSpinStage()}
@@ -1179,6 +1181,38 @@ function renderStylePicker() {
             <span>${escapeHTML(advice.predictions[key].shortLabel)}</span>
           </button>
         `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderGoalKickerPicker() {
+  const candidates = getGoalKickerCandidates();
+  const selected = getSelectedGoalKicker();
+
+  return `
+    <div class="goal-kicker-picker">
+      <div>
+        <h3>Goal Kicker</h3>
+        <p>${selected ? `${escapeHTML(selected.name)} has the tee for the season.` : "Choose who kicks goals for the season."}</p>
+      </div>
+      <div class="goal-kicker-options">
+        ${candidates.map((pick) => {
+          const ratings = getSimulationRatings(pick);
+          const active = selected?.id === pick.id;
+          return `
+            <button class="goal-kicker-button ${active ? "active" : ""}" data-action="set-goal-kicker" data-player-id="${pick.id}">
+              <span>
+                <b>${escapeHTML(pick.name)}</b>
+                <small>${escapeHTML(pick.slotLabel)}</small>
+              </span>
+              <span class="kicker-stats">
+                <span class="kicker-stat ${ratingClass(ratings.goalKicking)}">Goal ${ratings.goalKicking}</span>
+                <span class="kicker-stat ${ratingClass(ratings.kicking)}">Kick ${ratings.kicking}</span>
+              </span>
+            </button>
+          `;
+        }).join("")}
       </div>
     </div>
   `;
@@ -1571,7 +1605,7 @@ function renderPlayerStatsTable() {
         <tbody>
           ${rows.map((row) => `
             <tr>
-              <td>${escapeHTML(row.name)}${row.isImmortal ? ` <span class="inline-immortal">Immortal</span>` : ""}</td>
+              <td>${escapeHTML(row.name)}${row.isImmortal ? ` <span class="inline-immortal">Immortal</span>` : ""}${row.isGoalKicker ? ` <span class="inline-goal-kicker">GK</span>` : ""}</td>
               <td>${escapeHTML(row.slotLabel)}</td>
               <td>${row.games}</td>
               <td>${row.tries}</td>
@@ -1706,6 +1740,7 @@ function handleAction(event) {
   if (action === "reset") resetGame();
   if (action === "set-mode") setRatingMode(target.dataset.mode);
   if (action === "set-style") setPlayStyle(target.dataset.style);
+  if (action === "set-goal-kicker") setGoalKicker(target.dataset.playerId);
   if (action === "tab") setResultTab(target.dataset.tab);
   if (action === "copy-summary") copySummary();
   if (action === "copy-image") copySnapshotImage();
@@ -1722,6 +1757,13 @@ function setRatingMode(mode) {
 function setPlayStyle(style) {
   if (!PLAY_STYLES[style] || state.phase === "results") return;
   state.playStyle = style;
+  render();
+}
+
+function setGoalKicker(playerId) {
+  if (!isDraftComplete() || state.phase !== "draft") return;
+  if (!getGoalKickerCandidates().some((pick) => pick.id === playerId)) return;
+  state.goalKickerId = playerId;
   render();
 }
 
@@ -1796,6 +1838,9 @@ function draftPlayer(playerId, slotIndex) {
   });
   state.lockedCareers.add(candidate.careerId);
   state.currentOffer = null;
+  if (isDraftComplete()) {
+    state.goalKickerId = getGoalKickerCandidates()[0]?.id || null;
+  }
   render();
   scrollToSelectedXiii();
 }
@@ -1809,6 +1854,7 @@ function resetGame() {
   state.ratingMode = "career";
   state.playStyle = "balanced";
   state.drafted = [];
+  state.goalKickerId = null;
   state.lockedCareers = new Set();
   state.rerollUsed = false;
   state.currentOffer = null;
@@ -1837,6 +1883,27 @@ function getOpenSlots() {
 
 function getPickForSlot(index) {
   return state.drafted.find((pick) => pick.slotIndex === index);
+}
+
+function getGoalKickerCandidates() {
+  return [...state.drafted]
+    .sort((a, b) => goalKickerScore(b) - goalKickerScore(a) || getSimulationRatings(b).goalKicking - getSimulationRatings(a).goalKicking || a.name.localeCompare(b.name))
+    .slice(0, 5);
+}
+
+function goalKickerScore(pick) {
+  const ratings = getSimulationRatings(pick);
+  return ratings.goalKicking * 0.74 + ratings.kicking * 0.26;
+}
+
+function getSelectedGoalKicker() {
+  const selected = state.drafted.find((pick) => pick.id === state.goalKickerId);
+  if (selected) return selected;
+  return getGoalKickerCandidates()[0] || null;
+}
+
+function isSelectedGoalKicker(pick) {
+  return Boolean(isDraftComplete() && pick && getSelectedGoalKicker()?.id === pick.id);
 }
 
 function getEligibleGroups() {
@@ -2048,7 +2115,8 @@ function calculateTeamRatings() {
   const defence = Math.round(avg("defence") * 0.72 + avg("defence", forwards) * 0.22 + avg("workrate", forwards) * 0.06);
   const power = Math.round(avg("workrate") * 0.46 + avg("attack", middles.length ? middles : forwards) * 0.26 + avg("defence", forwards) * 0.28);
   const clutch = Math.round(avg("bigGame") * 0.62 + avg("bigGame", spine) * 0.2 + spineOverall * 0.08 + spineKicking * 0.1);
-  const goalSkill = Math.max(...picks.map((item) => getSimulationRatings(item).goalKicking));
+  const goalKicker = getSelectedGoalKicker();
+  const goalSkill = goalKicker ? getSimulationRatings(goalKicker).goalKicking : Math.max(...picks.map((item) => getSimulationRatings(item).goalKicking));
   const weakLink = Math.round(bottomThree.reduce((sum, value) => sum + value, 0) / bottomThree.length);
   const weakLinkPenalty = Math.max(0, 83 - weakLink) * 0.18;
   const fitAdjustment = (fitScore - 96) * 0.06;
@@ -2798,6 +2866,8 @@ function preventOnePointScore(details) {
 }
 
 function createPlayerStats() {
+  const selectedGoalKicker = getSelectedGoalKicker();
+
   return state.drafted.map((pick) => ({
     id: pick.id,
     careerId: pick.careerId,
@@ -2819,7 +2889,8 @@ function createPlayerStats() {
     ratings: getSimulationRatings(pick),
     baseRatings: pick.effectiveRatings,
     formDelta: pick.formDelta || 0,
-    isImmortal: Boolean(pick.isImmortal)
+    isImmortal: Boolean(pick.isImmortal),
+    isGoalKicker: selectedGoalKicker?.id === pick.id
   }));
 }
 
@@ -2846,7 +2917,7 @@ function recordUserStats(playerStats, scoreDetails, didWin) {
     tryScorers.push(scorer.row.name);
   }
 
-  const goalKicker = [...matchRows].sort((a, b) => b.row.ratings.goalKicking - a.row.ratings.goalKicking || b.row.ratings.kicking - a.row.ratings.kicking)[0];
+  const goalKicker = matchRows.find((item) => item.row.isGoalKicker) || [...matchRows].sort((a, b) => b.row.ratings.goalKicking - a.row.ratings.goalKicking || b.row.ratings.kicking - a.row.ratings.kicking)[0];
   const goalsMade = scoreDetails.goals + scoreDetails.penaltyGoals;
   const goalAttempts = scoreDetails.tries + scoreDetails.penaltyGoals;
   goalKicker.goals += goalsMade;
