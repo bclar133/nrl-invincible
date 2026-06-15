@@ -169,7 +169,7 @@ h1 {
   min-height: 36px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   padding: 8px 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -228,19 +228,19 @@ h1 {
 .icon,
 .button-icon {
   display: inline-grid;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   place-items: center;
   line-height: 1;
 }
 
 .button-icon {
-  flex: 0 0 18px;
+  flex: 0 0 14px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2.2;
+  stroke-width: 2;
 }
 
 .panel {

@@ -137,6 +137,49 @@ const CAREER_POSITION_OVERRIDES = {
   jamestedesco: ["fullback"]
 };
 
+const CAREER_RATING_CALIBRATION = {
+  "darren-lockyer-111": 97,
+  "allan-langer-227": 98,
+  "gorden-tallis-1273": 97,
+  "anthony-minichiello-834": 95,
+  "andrew-johns-276": 99,
+  "danny-buderus-782": 94,
+  "cameron-smith-742": 99,
+  "billy-slater-735": 98,
+  "greg-inglis-1379": 98,
+  "johnathan-thurston-125": 99,
+  "cooper-cronk-1595": 98,
+  "benji-marshall-312": 94,
+  "jarryd-hayne-3709": 93,
+  "james-tedesco-19474": 98,
+  "nathan-cleary-22776": 99,
+  "isaah-yeo-20713": 95,
+  "payne-haas-25859": 98,
+  "cameron-munster-20831": 95,
+  "roger-tuivasa-sheck-19974": 94,
+  "tom-trbojevic-21487": 97,
+  "brian-to-o-28598": 93,
+  "josh-addo-carr-22717": 90,
+  "jamie-lyon-1635": 91,
+  "justin-hodges-107": 91,
+  "matt-bowen-123": 90,
+  "preston-campbell-328": 89,
+  "nathan-hindmarsh-767": 90,
+  "luke-priddis-331": 89,
+  "paul-gallen-299": 95,
+  "jason-taumalolo-15034": 95,
+  "sam-burgess-3482": 94,
+  "fuifui-moimoi-1402": 85,
+  "mark-riddell-765": 85,
+  "shaun-johnson-17202": 89,
+  "daly-cherry-evans-16582": 93,
+  "adam-blair-3530": 85,
+  "darius-boyd-3516": 91,
+  "bryce-cartwright-20829": 84,
+  "tyrone-may-23814": 84,
+  "zeb-taia-3536": 70
+};
+
 const IMMORTAL_RATINGS = ratings(100, 100, 100, 100, 100, 100, 100);
 const IMMORTAL_OFFER_CHANCE = 0.015;
 const IMMORTAL_OPPONENT_CHANCE = 0.012;
@@ -1213,7 +1256,7 @@ function renderCandidateCard(candidate) {
   const career = careerProfiles.get(candidate.careerId) || { peakOverall: candidate.ratings.overall, peakRatings: candidate.ratings };
   const effective = getEffectiveRatings(candidate);
   const seasonOverall = candidate.ratings.overall;
-  const careerOverall = career.peakOverall;
+  const careerOverall = getCareerOverall(candidate, career);
   const availability = getPlayerAvailability(candidate);
   const effectivePositions = getEffectivePositions(candidate);
   const alternatePositions = effectivePositions.filter((position) => !candidate.positions.includes(position));
@@ -1354,6 +1397,7 @@ function renderResultsPanel() {
   const result = state.seasonResult;
   const leaders = result.leaders;
   const comparison = renderPredictionComparison(result);
+  const mvpRow = leaders.mvp.row;
 
   return `
     <section class="panel results-panel">
@@ -1378,10 +1422,7 @@ function renderResultsPanel() {
           <h2>${escapeHTML(leaders.mvp.name)}</h2>
           <p class="wheel-meta">${leaders.mvp.value} MVP votes | Team rating ${result.teamRatings.overall} | ${escapeHTML(result.teamRatings.styleLabel)}</p>
           <div class="leaders">
-            ${renderLeader("Attack", result.teamRatings.attack, "rating")}
-            ${renderLeader("Defence", result.teamRatings.defence, "rating")}
-            ${renderLeader("Power", result.teamRatings.power, "rating")}
-            ${renderLeader("Goal kick", result.teamRatings.goalSkill, "rating")}
+            ${renderMvpStatTiles(mvpRow)}
           </div>
         </div>
         ${comparison}
@@ -1417,6 +1458,24 @@ function renderLeader(label, name, value) {
       <span>${escapeHTML(String(value))}</span>
     </div>
   `;
+}
+
+function renderMvpStatTiles(row) {
+  if (!row) return "";
+
+  const tiles = [
+    renderLeader("Attack", row.ratings.attack, "rating"),
+    renderLeader("Defence", row.ratings.defence, "rating"),
+    renderLeader("Workrate", row.ratings.workrate, "rating")
+  ];
+
+  if (row.goalAttempts > 0) {
+    tiles.push(renderLeader("Goal %", formatGoalPercentage(row), `${row.goals}/${row.goalAttempts}`));
+  } else {
+    tiles.push(renderLeader("Run metres", formatNumber(row.runMetres), "season"));
+  }
+
+  return tiles.join("");
 }
 
 function resultClass(row) {
@@ -1859,7 +1918,8 @@ function getEffectivePositions(candidate) {
 function getEffectiveRatings(candidate) {
   const profile = careerProfiles.get(candidate.careerId);
   const source = state.ratingMode === "career" && profile ? profile.peakRatings : candidate.ratings;
-  return spreadRatings(source);
+  const ratings = spreadRatings(source);
+  return state.ratingMode === "career" ? applyCareerRatingCalibration(candidate, ratings) : ratings;
 }
 
 function spreadRatings(ratingSet) {
@@ -1873,6 +1933,38 @@ function spreadRatings(ratingSet) {
     kicking: spread(ratingSet.kicking),
     goalKicking: spread(ratingSet.goalKicking),
     bigGame: spread(ratingSet.bigGame)
+  };
+}
+
+function getCareerOverall(candidate, career) {
+  return CAREER_RATING_CALIBRATION[candidate.careerId] || career.peakOverall;
+}
+
+function applyCareerRatingCalibration(candidate, ratings) {
+  const targetOverall = CAREER_RATING_CALIBRATION[candidate.careerId];
+  if (!targetOverall || ratings.overall >= 100) {
+    return ratings;
+  }
+
+  const delta = targetOverall - ratings.overall;
+  if (delta === 0) {
+    return { ...ratings, overall: targetOverall };
+  }
+
+  const profile = careerProfiles.get(candidate.careerId);
+  const positions = profile?.positions || candidate.positions || [];
+  const isPlaymaker = positions.some((position) => ["fullback", "half", "hooker"].includes(position));
+  const adjust = (key, weight) => clamp(Math.round(ratings[key] + delta * weight), 45, 99);
+
+  return {
+    ...ratings,
+    overall: targetOverall,
+    attack: adjust("attack", 0.85),
+    defence: adjust("defence", 0.85),
+    workrate: adjust("workrate", 0.85),
+    kicking: isPlaymaker ? adjust("kicking", 0.45) : ratings.kicking,
+    goalKicking: ratings.goalKicking,
+    bigGame: adjust("bigGame", 0.9)
   };
 }
 
@@ -3032,7 +3124,7 @@ function calculateLeaders(playerStats) {
 
 function leaderBy(playerStats, key) {
   const row = [...playerStats].sort((a, b) => b[key] - a[key] || b.points - a.points || b.tries - a.tries)[0];
-  return { name: row.name, value: row[key] };
+  return { name: row.name, value: row[key], row };
 }
 
 function createSummary(userLadderRow, finals, regularResults, prediction) {
