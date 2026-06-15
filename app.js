@@ -3284,9 +3284,11 @@ function createSnapshotCanvas() {
   ctx.fillText(result.summary.record, 150, 340);
 
   ctx.fillStyle = "#d8dece";
-  ctx.font = "700 38px Inter, Arial, sans-serif";
-  ctx.fillText(`${result.summary.regularFinish} | ${result.summary.finalStatus} | ${formatTotalGames(result.summary)}`, 150, 405);
-  ctx.fillText(`${result.teamRatings.styleLabel} style | Points differential ${formatSigned(result.summary.pointsDiff)} | Team rating ${result.teamRatings.overall}`, 150, 455);
+  ctx.font = "700 34px Inter, Arial, sans-serif";
+  let summaryY = 405;
+  summaryY = drawText(ctx, `${result.summary.regularFinish} | ${result.summary.finalStatus} | ${formatTotalGames(result.summary)}`, 150, summaryY, 880, 40) + 2;
+  summaryY = drawText(ctx, `${result.teamRatings.styleLabel} style | Points differential ${formatSigned(result.summary.pointsDiff)}`, 150, summaryY, 880, 40) + 2;
+  summaryY = drawText(ctx, `Team rating ${result.teamRatings.overall}`, 150, summaryY, 880, 40) + 2;
 
   const leaderRows = [
     ["Top try-scorer", `${result.leaders.tries.name} (${result.leaders.tries.value})`],
@@ -3296,7 +3298,7 @@ function createSnapshotCanvas() {
     ["MVP", `${result.leaders.mvp.name} (${result.leaders.mvp.value} votes)`]
   ];
 
-  let y = 550;
+  let y = Math.max(570, summaryY + 36);
   for (const [label, value] of leaderRows) {
     ctx.fillStyle = "#aeb9ad";
     ctx.font = "800 26px Inter, Arial, sans-serif";
@@ -3377,6 +3379,7 @@ function drawText(ctx, text, x, y, maxWidth, lineHeight) {
   }
 
   if (line) ctx.fillText(line, x, cursorY);
+  return cursorY + lineHeight;
 }
 
 function downloadCanvas(canvas) {
